@@ -1,6 +1,4 @@
-/**
- * @format
- */
+import 'react-native-gesture-handler';   // MUST BE FIRST
 
 import { AppRegistry } from 'react-native';
 import App from './App';
