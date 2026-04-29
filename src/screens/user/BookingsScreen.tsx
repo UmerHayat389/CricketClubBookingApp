@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, FlatList, StyleSheet,
-  TouchableOpacity, ActivityIndicator, RefreshControl,
+  View, Text, FlatList, StyleSheet, TouchableOpacity,
+  ActivityIndicator, RefreshControl, Image, Platform, StatusBar,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useDispatch, useSelector } from 'react-redux';
@@ -10,21 +10,20 @@ import { getBookings } from '../../services/bookingService';
 import { setBookings, addBooking, updateBooking } from '../../store/slices/bookingSlice';
 import { RootState } from '../../store';
 
-const STATUS_CONFIG: any = {
-  pending:  { color: '#F59E0B', bg: '#FFFBEB', icon: 'time-outline',             label: 'Pending'  },
-  approved: { color: '#0A8F3C', bg: '#F0FFF6', icon: 'checkmark-circle-outline', label: 'Approved' },
-  rejected: { color: '#EF4444', bg: '#FEF2F2', icon: 'close-circle-outline',     label: 'Rejected' },
-};
+// Map status → tab key
+// Upcoming  = pending + approved
+// Completed = approved (treated as completed for display; adjust if you have a 'completed' status)
+// Cancelled = rejected
+type TabType = 'upcoming' | 'completed' | 'cancelled';
 
-type FilterType = 'all' | 'pending' | 'approved' | 'rejected';
+const GROUND_IMAGE = 'https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?w=400';
 
-const BookingsScreen = () => {
-  // ── ALL HOOKS FIRST – never conditionally ──────────────────────
+const BookingsScreen = ({ navigation }: any) => {
   const dispatch   = useDispatch();
   const bookings   = useSelector((state: RootState) => state.booking.bookings);
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [filter,     setFilter]     = useState<FilterType>('all');
+  const [activeTab,  setActiveTab]  = useState<TabType>('upcoming');
 
   const loadBookings = useCallback(async () => {
     try {
@@ -40,141 +39,140 @@ const BookingsScreen = () => {
 
   useEffect(() => {
     loadBookings();
-
     const handleCreate = (b: any) => dispatch(addBooking(b));
     const handleUpdate = (b: any) => dispatch(updateBooking(b));
-
     socket.on('bookingCreated', handleCreate);
     socket.on('bookingUpdated', handleUpdate);
-
     return () => {
       socket.off('bookingCreated', handleCreate);
       socket.off('bookingUpdated', handleUpdate);
     };
   }, [loadBookings]);
 
-  // ── Derived data (no hooks below this point) ───────────────────
-  const filtered = filter === 'all'
-    ? bookings
-    : bookings.filter(b => b.status === filter);
+  // ── Filter logic ───────────────────────────────────────────────
+  const upcomingList  = bookings.filter(b => b.status === 'pending' || b.status === 'approved');
+  const completedList = bookings.filter(b => b.status === 'approved');
+  const cancelledList = bookings.filter(b => b.status === 'rejected');
 
-  const counts = {
-    all:      bookings.length,
-    pending:  bookings.filter(b => b.status === 'pending').length,
-    approved: bookings.filter(b => b.status === 'approved').length,
-    rejected: bookings.filter(b => b.status === 'rejected').length,
+  const tabData: Record<TabType, any[]> = {
+    upcoming:  upcomingList,
+    completed: completedList,
+    cancelled: cancelledList,
   };
+
+  const filtered = tabData[activeTab];
 
   const onRefresh = () => { setRefreshing(true); loadBookings(); };
 
-  // ── Render helpers ─────────────────────────────────────────────
+  // Short booking ID from _id
+  const shortId = (id: string) => `#GF${id.slice(-5).toUpperCase()}`;
+
+  // ── Render card ────────────────────────────────────────────────
   const renderItem = ({ item }: any) => {
-    const sc = STATUS_CONFIG[item.status] ?? STATUS_CONFIG.pending;
+    const statusColor =
+      item.status === 'approved' ? '#0A8F3C' :
+      item.status === 'rejected' ? '#EF4444' : '#F59E0B';
+
+    const statusLabel =
+      item.status === 'approved' ? 'Upcoming' :
+      item.status === 'rejected' ? 'Cancelled' : 'Upcoming';
+
+    const statusBg =
+      item.status === 'approved' ? '#E8F5EE' :
+      item.status === 'rejected' ? '#FEF2F2' : '#FFF7ED';
+
     return (
       <View style={styles.card}>
-        <View style={[styles.statusStrip, { backgroundColor: sc.color }]} />
-        <View style={styles.cardContent}>
+        {/* Status badge over image */}
+        <View style={styles.cardImageWrap}>
+          <Image source={{ uri: GROUND_IMAGE }} style={styles.cardImage} />
+          <View style={[styles.statusBadge, { backgroundColor: statusBg }]}>
+            <Text style={[styles.statusBadgeText, { color: statusColor }]}>{statusLabel}</Text>
+          </View>
+        </View>
 
-          {/* Header */}
-          <View style={styles.cardHeader}>
-            <View>
+        {/* Card body */}
+        <View style={styles.cardBody}>
+          {/* Top row */}
+          <View style={styles.cardTopRow}>
+            <View style={{ flex: 1 }}>
               <Text style={styles.groundName}>Green Field Arena</Text>
               <View style={styles.locationRow}>
                 <Icon name="location-outline" size={12} color="#888" />
                 <Text style={styles.locationText}>Lahore, Punjab</Text>
               </View>
             </View>
-            <View style={[styles.statusBadge, { backgroundColor: sc.bg }]}>
-              <Icon name={sc.icon} size={13} color={sc.color} />
-              <Text style={[styles.statusText, { color: sc.color }]}>{sc.label}</Text>
+            <View style={styles.bookingIdWrap}>
+              <Text style={styles.bookingIdLabel}>Booking ID</Text>
+              <Text style={styles.bookingIdVal}>{shortId(item._id)}</Text>
             </View>
           </View>
 
-          {/* Detail Grid */}
-          <View style={styles.detailGrid}>
-            {[
-              { icon: 'calendar-outline',  label: 'Date',     val: item.date },
-              { icon: 'time-outline',      label: 'Time Slot',val: item.slotTime },
-              { icon: 'hourglass-outline', label: 'Duration', val: `${item.duration} Hr` },
-              { icon: 'people-outline',    label: 'Players',  val: String(item.numberOfPlayers) },
-            ].map(d => (
-              <View key={d.label} style={styles.detailItem}>
-                <Icon name={d.icon} size={14} color="#0A8F3C" />
-                <View>
-                  <Text style={styles.detailLabel}>{d.label}</Text>
-                  <Text style={styles.detailVal}>{d.val}</Text>
-                </View>
-              </View>
-            ))}
+          {/* Info row */}
+          <View style={styles.infoRow}>
+            <View style={styles.infoItem}>
+              <Icon name="calendar-outline" size={13} color="#0A8F3C" />
+              <Text style={styles.infoText}>{item.date}</Text>
+            </View>
+            <View style={styles.infoItem}>
+              <Icon name="time-outline" size={13} color="#0A8F3C" />
+              <Text style={styles.infoText}>{item.slotTime}</Text>
+            </View>
+            <View style={styles.infoItem}>
+              <Icon name="hourglass-outline" size={13} color="#0A8F3C" />
+              <Text style={styles.infoText}>{item.duration} Hr</Text>
+            </View>
           </View>
 
           {/* Footer */}
           <View style={styles.cardFooter}>
-            <Text style={styles.bookedBy}>
-              <Text style={{ color: '#888' }}>Booked by  </Text>
-              {item.userName}
+            <Text style={styles.amountText}>
+              PKR {Number(item.totalAmount).toLocaleString()}
             </Text>
-            <Text style={styles.amount}>PKR {Number(item.totalAmount).toLocaleString()}</Text>
+            <TouchableOpacity style={styles.detailsBtn}>
+              <Text style={styles.detailsBtnText}>View Details</Text>
+              <Icon name="chevron-forward" size={14} color="#0A8F3C" />
+            </TouchableOpacity>
           </View>
-
-          {/* Status message */}
-          {{
-            pending:  { icon: 'information-circle-outline', msg: 'Awaiting admin approval' },
-            approved: { icon: 'checkmark-circle-outline',   msg: 'Your booking is confirmed!' },
-            rejected: { icon: 'close-circle-outline',       msg: 'Booking was rejected. Contact support.' },
-          }[item.status as string] && (
-            <View style={styles.statusMsg}>
-              <Icon
-                name={({ pending: 'information-circle-outline', approved: 'checkmark-circle-outline', rejected: 'close-circle-outline' } as any)[item.status]}
-                size={14} color={sc.color}
-              />
-              <Text style={[styles.statusMsgText, { color: sc.color }]}>
-                {({ pending: 'Awaiting admin approval', approved: 'Your booking is confirmed!', rejected: 'Booking was rejected. Contact support.' } as any)[item.status]}
-              </Text>
-            </View>
-          )}
         </View>
       </View>
     );
   };
 
-  // ── JSX ────────────────────────────────────────────────────────
+  const TABS: { key: TabType; label: string }[] = [
+    { key: 'upcoming',  label: 'Upcoming'  },
+    { key: 'completed', label: 'Completed' },
+    { key: 'cancelled', label: 'Cancelled' },
+  ];
+
   return (
     <View style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
-      {/* Header */}
+      {/* ── Header ── */}
       <View style={styles.header}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <Icon name="arrow-back" size={22} color="#111" />
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>My Bookings</Text>
         <TouchableOpacity onPress={onRefresh}>
           <Icon name="refresh-outline" size={22} color="#0A8F3C" />
         </TouchableOpacity>
       </View>
 
-      {/* Stats */}
-      <View style={styles.statsRow}>
-        {[
-          { key: 'pending',  color: '#F59E0B', bg: '#FFF7ED' },
-          { key: 'approved', color: '#0A8F3C', bg: '#F0FFF6' },
-          { key: 'rejected', color: '#EF4444', bg: '#FEF2F2' },
-          { key: 'all',      color: '#555555', bg: '#F5F5F5' },
-        ].map(s => (
-          <View key={s.key} style={[styles.statCard, { backgroundColor: s.bg }]}>
-            <Text style={[styles.statNum, { color: s.color }]}>{counts[s.key as FilterType]}</Text>
-            <Text style={styles.statLabel}>{s.key.charAt(0).toUpperCase() + s.key.slice(1)}</Text>
-          </View>
-        ))}
-      </View>
-
-      {/* Filter Tabs */}
-      <View style={styles.filterRow}>
-        {(['all', 'pending', 'approved', 'rejected'] as FilterType[]).map(f => (
+      {/* ── Tabs ── */}
+      <View style={styles.tabsRow}>
+        {TABS.map(t => (
           <TouchableOpacity
-            key={f}
-            style={[styles.filterTab, filter === f && styles.filterTabActive]}
-            onPress={() => setFilter(f)}
+            key={t.key}
+            style={[styles.tab, activeTab === t.key && styles.tabActive]}
+            onPress={() => setActiveTab(t.key)}
           >
-            <Text style={[styles.filterText, filter === f && styles.filterTextActive]}>
-              {f.charAt(0).toUpperCase() + f.slice(1)}
+            {activeTab === t.key && (
+              <Icon name="checkmark-circle-outline" size={14} color="#0A8F3C" style={{ marginRight: 4 }} />
+            )}
+            <Text style={[styles.tabText, activeTab === t.key && styles.tabTextActive]}>
+              {t.label}
             </Text>
           </TouchableOpacity>
         ))}
@@ -186,15 +184,31 @@ const BookingsScreen = () => {
         <FlatList
           data={filtered}
           keyExtractor={i => i._id}
-          contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0A8F3C" />}
+          contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0A8F3C" />
+          }
+          ListHeaderComponent={
+            filtered.length > 0 ? (
+              <View style={styles.listHeader}>
+                <Text style={styles.listHeaderText}>
+                  {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} Bookings
+                </Text>
+                <TouchableOpacity style={styles.filterBtn}>
+                  <Icon name="filter-outline" size={14} color="#555" />
+                  <Text style={styles.filterBtnText}>Filter</Text>
+                  <Icon name="chevron-down" size={13} color="#555" />
+                </TouchableOpacity>
+              </View>
+            ) : null
+          }
           ListEmptyComponent={() => (
             <View style={styles.empty}>
-              <Icon name="calendar-outline" size={56} color="#DDD" />
-              <Text style={styles.emptyTitle}>No bookings found</Text>
+              <Icon name="calendar-outline" size={60} color="#DDD" />
+              <Text style={styles.emptyTitle}>No {activeTab} bookings</Text>
               <Text style={styles.emptySubtitle}>
-                {filter === 'all' ? 'You have not made any bookings yet' : `No ${filter} bookings`}
+                {activeTab === 'upcoming' ? 'Book a slot to get started' : `No ${activeTab} bookings found`}
               </Text>
             </View>
           )}
@@ -211,57 +225,149 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F6F7FB' },
 
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingTop: 50, paddingBottom: 14,
-    backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F0F0F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 54 : (StatusBar.currentHeight ?? 24) + 8,
+    paddingBottom: 14,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
   },
-  headerTitle: { fontSize: 22, fontWeight: '900', color: '#111' },
-
-  statsRow: { flexDirection: 'row', gap: 10, padding: 16, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
-  statCard:  { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 12 },
-  statNum:   { fontSize: 20, fontWeight: '900' },
-  statLabel: { fontSize: 10, color: '#888', marginTop: 2 },
-
-  filterRow: {
-    flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingVertical: 12,
-    backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F5F5F5',
+  backBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: '#F5F5F5',
+    alignItems: 'center', justifyContent: 'center',
   },
-  filterTab:       { flex: 1, alignItems: 'center', paddingVertical: 7, borderRadius: 20, backgroundColor: '#F5F5F5' },
-  filterTabActive: { backgroundColor: '#0A8F3C' },
-  filterText:      { fontSize: 12, color: '#777', fontWeight: '600' },
-  filterTextActive:{ color: '#fff' },
+  headerTitle: { fontSize: 20, fontWeight: '800', color: '#111' },
 
+  // Tabs
+  tabsRow: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    backgroundColor: '#FAFAFA',
+  },
+  tabActive: {
+    borderColor: '#0A8F3C',
+    backgroundColor: '#F0FFF6',
+  },
+  tabText: { fontSize: 12, color: '#888', fontWeight: '600' },
+  tabTextActive: { color: '#0A8F3C' },
+
+  listContent: { padding: 16, paddingBottom: 32 },
+
+  listHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  listHeaderText: { fontSize: 16, fontWeight: '700', color: '#111' },
+  filterBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: '#F5F5F5',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  filterBtnText: { fontSize: 12, color: '#555', fontWeight: '600' },
+
+  // Card
   card: {
-    flexDirection: 'row', backgroundColor: '#fff', borderRadius: 16, marginBottom: 12,
-    elevation: 2, shadowColor: '#000', shadowOpacity: 0.06, shadowOffset: { width: 0, height: 2 }, shadowRadius: 6,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    marginBottom: 14,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 6,
     overflow: 'hidden',
+    flexDirection: 'row',
   },
-  statusStrip: { width: 5 },
-  cardContent: { flex: 1, padding: 14 },
+  cardImageWrap: {
+    width: 100,
+    position: 'relative',
+  },
+  cardImage: {
+    width: 100,
+    height: '100%',
+    minHeight: 110,
+  },
+  statusBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  statusBadgeText: { fontSize: 10, fontWeight: '700' },
 
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
-  groundName: { fontSize: 15, fontWeight: '800', color: '#111' },
-  locationRow:{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 },
-  locationText:{ fontSize: 11, color: '#888' },
-  statusBadge:{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
-  statusText: { fontSize: 11, fontWeight: '700' },
+  cardBody: { flex: 1, padding: 12 },
 
-  detailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12 },
-  detailItem: { flexDirection: 'row', alignItems: 'center', gap: 6, width: '45%' },
-  detailLabel:{ fontSize: 10, color: '#AAA' },
-  detailVal:  { fontSize: 12, fontWeight: '700', color: '#111' },
+  cardTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  groundName:   { fontSize: 14, fontWeight: '800', color: '#111' },
+  locationRow:  { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 2 },
+  locationText: { fontSize: 11, color: '#888' },
+
+  bookingIdWrap: { alignItems: 'flex-end' },
+  bookingIdLabel: { fontSize: 9, color: '#AAA', fontWeight: '500' },
+  bookingIdVal:   { fontSize: 11, fontWeight: '700', color: '#555' },
+
+  infoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
+  infoItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  infoText: { fontSize: 11, color: '#555', fontWeight: '500' },
 
   cardFooter: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F5F5F5', marginBottom: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F5F5F5',
   },
-  bookedBy: { fontSize: 13, fontWeight: '600', color: '#333' },
-  amount:   { fontSize: 16, fontWeight: '900', color: '#0A8F3C' },
+  amountText: { fontSize: 15, fontWeight: '900', color: '#111' },
+  detailsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#C8EDD8',
+    backgroundColor: '#F0FFF6',
+  },
+  detailsBtnText: { fontSize: 12, fontWeight: '700', color: '#0A8F3C' },
 
-  statusMsg:     { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FAFAFA', padding: 8, borderRadius: 8 },
-  statusMsgText: { fontSize: 12, fontWeight: '600' },
-
-  empty:        { alignItems: 'center', marginTop: 70 },
-  emptyTitle:   { fontSize: 18, fontWeight: '700', color: '#CCC', marginTop: 16 },
-  emptySubtitle:{ fontSize: 13, color: '#DDD', marginTop: 6 },
+  // Empty
+  empty:         { alignItems: 'center', marginTop: 80 },
+  emptyTitle:    { fontSize: 18, fontWeight: '700', color: '#CCC', marginTop: 16 },
+  emptySubtitle: { fontSize: 13, color: '#DDD', marginTop: 6 },
 });

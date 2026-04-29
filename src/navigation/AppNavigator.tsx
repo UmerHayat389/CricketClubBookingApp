@@ -1,27 +1,50 @@
 import React, { useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import UserTabs from './UserTabs';
 import AdminTabs from './AdminTabs';
 import AdminLoginScreen from '../screens/admin/AdminLoginScreen';
 
+const Stack = createNativeStackNavigator();
+
+// ─── User flow: UserTabs + AdminLogin as a modal stack ───────────
+const UserStack = ({ onAdminLogin }: { onAdminLogin: () => void }) => {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="UserTabs">
+        {(props) => (
+          <UserTabs
+            {...props}
+            openAdminLogin={() =>
+              (props.navigation as any).navigate('AdminLogin')
+            }
+          />
+        )}
+      </Stack.Screen>
+      <Stack.Screen
+        name="AdminLogin"
+        options={{
+          presentation: 'modal',
+          headerShown: false,
+        }}
+      >
+        {() => <AdminLoginScreen onLogin={onAdminLogin} />}
+      </Stack.Screen>
+    </Stack.Navigator>
+  );
+};
+
+// ─── Root navigator ───────────────────────────────────────────────
 const AppNavigator = () => {
   const [isAdmin, setIsAdmin] = useState(false);
-  const [showLogin, setShowLogin] = useState(false);
-
-  if (showLogin && !isAdmin) {
-    return (
-      <NavigationContainer>
-        <AdminLoginScreen onLogin={() => setIsAdmin(true)} />
-      </NavigationContainer>
-    );
-  }
 
   return (
+    // Single NavigationContainer — never conditionally swap it
     <NavigationContainer>
       {isAdmin ? (
         <AdminTabs />
       ) : (
-        <UserTabs openAdminLogin={() => setShowLogin(true)} />
+        <UserStack onAdminLogin={() => setIsAdmin(true)} />
       )}
     </NavigationContainer>
   );
