@@ -9,7 +9,11 @@ const AppNavigator = () => {
   const [showLogin, setShowLogin] = useState(false);
 
   if (showLogin && !isAdmin) {
-    return <AdminLoginScreen onLogin={() => setIsAdmin(true)} />;
+    return (
+      <NavigationContainer>
+        <AdminLoginScreen onLogin={() => setIsAdmin(true)} />
+      </NavigationContainer>
+    );
   }
 
   return (
