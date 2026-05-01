@@ -1,5 +1,5 @@
 const express = require('express');
-const router = express.Router();
+const router  = express.Router();
 
 const {
   createBooking,
@@ -7,14 +7,17 @@ const {
   getBookedSlots,
   approveBooking,
   rejectBooking,
+  getDashboardStats,
 } = require('../controllers/bookingController');
 
 const upload = require('../middleware/uploadMiddleware');
 
-router.post('/', upload.single('paymentScreenshot'), createBooking);
-router.get('/', getBookings);
+// Stats MUST be before /:id style routes
+router.get('/stats',        getDashboardStats);
 router.get('/booked-slots', getBookedSlots);
-router.put('/approve/:id', approveBooking);
-router.put('/reject/:id', rejectBooking);
+router.get('/',             getBookings);
+router.post('/',            upload.single('paymentScreenshot'), createBooking);
+router.put('/approve/:id',  approveBooking);
+router.put('/reject/:id',   rejectBooking);
 
 module.exports = router;

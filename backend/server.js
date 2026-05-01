@@ -1,9 +1,10 @@
 const express = require('express');
-const dotenv = require('dotenv');
-const cors = require('cors');
-const http = require('http');
+const dotenv  = require('dotenv');
+const cors    = require('cors');
+const http    = require('http');
+const path    = require('path');
 
-const connectDB = require('./src/config/db');
+const connectDB    = require('./src/config/db');
 const { initSocket } = require('./src/config/socket');
 
 dotenv.config();
@@ -17,29 +18,29 @@ connectDB();
 app.use(cors());
 app.use(express.json());
 
-// Static folder for uploads
-app.use('/uploads', express.static('src/uploads'));
+// Static folders for uploads
+// Booking payment screenshots  → /uploads/filename.jpg
+// Event banners                → /uploads/events/filename.jpg
+app.use('/uploads', express.static(path.join(__dirname, 'src/uploads')));
 
 // Routes
-app.use('/api/auth', require('./src/routes/authRoutes'));
-app.use('/api/bookings', require('./src/routes/bookingRoutes'));
-app.use('/api/events', require('./src/routes/eventRoutes'));
-app.use('/api/employees', require('./src/routes/employeeRoutes'));
+app.use('/api/auth',       require('./src/routes/authRoutes'));
+app.use('/api/user-auth',  require('./src/routes/userAuthRoutes')); // ← user login/register
+app.use('/api/bookings',   require('./src/routes/bookingRoutes'));
+app.use('/api/events',     require('./src/routes/eventRoutes'));
+app.use('/api/employees',  require('./src/routes/employeeRoutes'));
 
-// Test route
-app.get('/', (req, res) => {
-  res.send('API Running...');
-});
+// Health check
+app.get('/', (req, res) => res.send('API Running...'));
 
 const PORT = process.env.PORT || 5000;
 
-// 🔥 Create HTTP server (IMPORTANT for Socket.IO)
+// Create HTTP server (required for Socket.IO)
 const server = http.createServer(app);
 
-// 🔥 Initialize Socket.IO
+// Initialize Socket.IO
 initSocket(server);
 
-// Start server
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });

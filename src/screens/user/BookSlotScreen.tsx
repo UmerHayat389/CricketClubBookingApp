@@ -13,29 +13,37 @@ import {
   setBookedSlots, addBookedSlot, removeBookedSlot, addBooking,
 } from '../../store/slices/bookingSlice';
 import { RootState } from '../../store';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+// ─── Constants ────────────────────────────────────────────────────
+// Slots: 4:00 PM → 1:00 AM only
 const ALL_SLOTS = [
-  '06:00 AM', '07:00 AM', '08:00 AM', '09:00 AM',
-  '10:00 AM', '11:00 AM', '12:00 PM', '01:00 PM',
-  '02:00 PM', '03:00 PM', '04:00 PM', '05:00 PM',
-  '06:00 PM', '07:00 PM', '08:00 PM', '09:00 PM',
+  '04:00 PM', '05:00 PM', '06:00 PM', '07:00 PM',
+  '08:00 PM', '09:00 PM', '10:00 PM', '11:00 PM',
+  '12:00 AM', '01:00 AM',
 ];
 
+// Durations: 1 Hour and 2 Hours only, max 4 hours per booking
 const DURATIONS = [
-  { label: '1 Hour',    value: 1,   slots: 1 },
-  { label: '1.5 Hours', value: 1.5, slots: 2 },
-  { label: '2 Hours',   value: 2,   slots: 2 },
-  { label: '2.5 Hours', value: 2.5, slots: 3 },
-  { label: '3 Hours',   value: 3,   slots: 3 },
+  { label: '1 Hour', value: 1, slots: 1 },
+  { label: '2 Hours', value: 2, slots: 2 },
+  { label: '3 Hours', value: 3, slots: 3 },
+  { label: '4 Hours', value: 4, slots: 4 },
 ];
 
 const PRICE_PER_HOUR = 1200;
+const MAX_PLAYERS    = 22;
+const MAX_NAME       = 50;
+const MAX_PHONE      = 11;
 
+// 15 days from today, recalculated each render so it stays current
 const getDays = () => {
-  const days = [];
-  const dayNames  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const days       = [];
+  const dayNames   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  for (let i = 0; i < 14; i++) {
+  const fullMonths = ['January','February','March','April','May','June',
+                      'July','August','September','October','November','December'];
+  for (let i = 0; i < 15; i++) {
     const d = new Date();
     d.setDate(d.getDate() + i);
     days.push({
@@ -44,7 +52,7 @@ const getDays = () => {
       month:     monthNames[d.getMonth()],
       year:      d.getFullYear(),
       full:      d.toISOString().split('T')[0],
-      monthName: monthNames[d.getMonth()],
+      monthName: fullMonths[d.getMonth()],
     });
   }
   return days;
@@ -58,40 +66,32 @@ const Toast = ({ visible, message, type }: {
   const translateY = useRef(new Animated.Value(20)).current;
 
   useEffect(() => {
-    if (visible) {
-      Animated.parallel([
-        Animated.timing(opacity,    { toValue: 1, duration: 250, useNativeDriver: true }),
-        Animated.timing(translateY, { toValue: 0, duration: 250, useNativeDriver: true }),
-      ]).start();
-    } else {
-      Animated.parallel([
-        Animated.timing(opacity,    { toValue: 0, duration: 200, useNativeDriver: true }),
-        Animated.timing(translateY, { toValue: 20, duration: 200, useNativeDriver: true }),
-      ]).start();
-    }
+    Animated.parallel([
+      Animated.timing(opacity,    { toValue: visible ? 1 : 0, duration: visible ? 250 : 200, useNativeDriver: true }),
+      Animated.timing(translateY, { toValue: visible ? 0 : 20, duration: visible ? 250 : 200, useNativeDriver: true }),
+    ]).start();
   }, [visible]);
 
-  const colors: any = {
+  const C: any = {
     error:   { bg: '#FEF2F2', border: '#EF4444', icon: 'close-circle',       iconColor: '#EF4444' },
     success: { bg: '#F0FFF6', border: '#0A8F3C', icon: 'checkmark-circle',   iconColor: '#0A8F3C' },
     info:    { bg: '#FFF7ED', border: '#F59E0B', icon: 'information-circle', iconColor: '#F59E0B' },
   };
-  const c = colors[type];
-
+  const c = C[type];
   return (
     <Animated.View style={[
-      toastStyles.container,
+      toastSt.container,
       { opacity, transform: [{ translateY }], backgroundColor: c.bg, borderLeftColor: c.border },
     ]}>
       <Icon name={c.icon} size={20} color={c.iconColor} />
-      <Text style={[toastStyles.text, { color: c.border }]}>{message}</Text>
+      <Text style={[toastSt.text, { color: c.border }]}>{message}</Text>
     </Animated.View>
   );
 };
 
-const toastStyles = StyleSheet.create({
+const toastSt = StyleSheet.create({
   container: {
-    position: 'absolute', bottom: 100, left: 20, right: 20,
+    position: 'absolute', bottom: 160, left: 20, right: 20,
     flexDirection: 'row', alignItems: 'center', gap: 10,
     padding: 14, borderRadius: 12, borderLeftWidth: 4,
     elevation: 10, shadowColor: '#000', shadowOpacity: 0.15,
@@ -103,10 +103,12 @@ const toastStyles = StyleSheet.create({
 // ─── Main Screen ──────────────────────────────────────────────────
 const BookSlotScreen = ({ navigation }: any) => {
   const dispatch    = useDispatch();
+  const insets      = useSafeAreaInsets();
   const bookedSlots = useSelector((state: RootState) => state.booking.bookedSlots);
 
-  const days = getDays();
-  const [selectedDate,     setSelectedDate]     = useState(days[0]);
+  // days regenerated fresh so "today" is always correct
+  const [days]               = useState(() => getDays());
+  const [selectedDate,     setSelectedDate]     = useState(() => getDays()[0]);
   const [selectedSlots,    setSelectedSlots]    = useState<string[]>([]);
   const [selectedDuration, setSelectedDuration] = useState(DURATIONS[0]);
   const [name,    setName]    = useState('');
@@ -116,10 +118,15 @@ const BookSlotScreen = ({ navigation }: any) => {
   const [image,   setImage]   = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [paymentModal, setPaymentModal] = useState(false);
-  const [toast, setToast] = useState({ visible: false, message: '', type: 'info' as 'error' | 'success' | 'info' });
+
+  // Inline field errors (shown only when limit exceeded)
+  const [nameError,  setNameError]  = useState('');
+  const [phoneError, setPhoneError] = useState('');
+
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'info' as 'error'|'success'|'info' });
   const toastTimer = useRef<any>(null);
 
-  const showToast = (message: string, type: 'error' | 'success' | 'info' = 'info') => {
+  const showToast = (message: string, type: 'error'|'success'|'info' = 'info') => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast({ visible: true, message, type });
     toastTimer.current = setTimeout(() => setToast(t => ({ ...t, visible: false })), 3000);
@@ -127,6 +134,7 @@ const BookSlotScreen = ({ navigation }: any) => {
 
   const totalAmount = Math.round(PRICE_PER_HOUR * selectedDuration.value);
 
+  // ── Socket + initial load ──────────────────────────────────────
   useEffect(() => {
     loadBooked(selectedDate.full);
     socket.on('slotBooked', ({ date, slotTime }: any) => dispatch(addBookedSlot({ date, slotTime })));
@@ -139,6 +147,7 @@ const BookSlotScreen = ({ navigation }: any) => {
     setSelectedSlots([]);
   }, [selectedDate]);
 
+  // trim slots when duration shrinks
   useEffect(() => {
     if (selectedSlots.length > selectedDuration.slots) {
       setSelectedSlots(selectedSlots.slice(0, selectedDuration.slots));
@@ -149,16 +158,17 @@ const BookSlotScreen = ({ navigation }: any) => {
     try {
       const data = await getBookedSlots(date);
       dispatch(setBookedSlots(data));
-    } catch (e) {}
+    } catch {}
   };
 
   const isSlotBooked = (slot: string) =>
     bookedSlots.some(s => s.slotTime === slot && s.date === selectedDate.full);
 
+  // ── Slot selection ─────────────────────────────────────────────
   const handleSlotPress = (slot: string) => {
     if (isSlotBooked(slot)) { showToast('This slot is already booked!', 'error'); return; }
 
-    const maxSlots      = selectedDuration.slots;
+    const maxSlots        = selectedDuration.slots;
     const alreadySelected = selectedSlots.includes(slot);
 
     if (alreadySelected) { setSelectedSlots(selectedSlots.filter(s => s !== slot)); return; }
@@ -180,33 +190,53 @@ const BookSlotScreen = ({ navigation }: any) => {
     setSelectedSlots([...selectedSlots, slot]);
   };
 
+  // ── Field change handlers with validation ──────────────────────
+  const handleNameChange = (v: string) => {
+    setName(v);
+    setNameError(v.length > MAX_NAME ? `Name cannot exceed ${MAX_NAME} characters` : '');
+  };
+
+  const handlePhoneChange = (v: string) => {
+    // allow only digits
+    const digits = v.replace(/[^0-9]/g, '');
+    setPhone(digits);
+    setPhoneError(digits.length > MAX_PHONE ? `Phone cannot exceed ${MAX_PHONE} digits` : '');
+  };
+
+  // ── Image picker ───────────────────────────────────────────────
   const pickImage = async () => {
     const res = await launchImageLibrary({ mediaType: 'photo' });
     if (res.assets && res.assets[0]) setImage(res.assets[0]);
   };
 
+  // ── Confirm booking ────────────────────────────────────────────
   const handleConfirmBooking = () => {
-    if (selectedSlots.length === 0)                          { showToast('Please select a time slot', 'error'); return; }
-    if (selectedSlots.length < selectedDuration.slots)       { showToast(`Please select ${selectedDuration.slots} consecutive slots for ${selectedDuration.label}`, 'info'); return; }
-    if (!name.trim())                                        { showToast('Please enter your full name', 'error'); return; }
-    if (!phone.trim())                                       { showToast('Please enter your phone number', 'error'); return; }
+    if (selectedSlots.length === 0)                     { showToast('Please select a time slot', 'error'); return; }
+    if (selectedSlots.length < selectedDuration.slots)  { showToast(`Please select ${selectedDuration.slots} consecutive slot(s) for ${selectedDuration.label}`, 'info'); return; }
+    if (!name.trim())                                   { setNameError('Full name is required'); showToast('Please enter your full name', 'error'); return; }
+    if (name.length > MAX_NAME)                         { showToast(`Name cannot exceed ${MAX_NAME} characters`, 'error'); return; }
+    if (!phone.trim())                                  { setPhoneError('Phone number is required'); showToast('Please enter your phone number', 'error'); return; }
+    if (phone.length > MAX_PHONE)                       { showToast(`Phone cannot exceed ${MAX_PHONE} digits`, 'error'); return; }
+    setNameError('');
+    setPhoneError('');
     setPaymentModal(true);
   };
 
+  // ── Submit ─────────────────────────────────────────────────────
   const submitBooking = async () => {
     if (!image) { showToast('Please upload payment screenshot', 'error'); return; }
     setLoading(true);
     try {
       const sortedSlots = [...selectedSlots].sort((a, b) => ALL_SLOTS.indexOf(a) - ALL_SLOTS.indexOf(b));
       const formData = new FormData();
-      formData.append('userName',        name);
-      formData.append('phone',           phone);
-      formData.append('slotTime',        sortedSlots.join(' - '));
-      formData.append('date',            selectedDate.full);
-      formData.append('duration',        String(selectedDuration.value));
-      formData.append('numberOfPlayers', String(players));
-      formData.append('notes',           notes);
-      formData.append('totalAmount',     String(totalAmount));
+      formData.append('userName',          name);
+      formData.append('phone',             phone);
+      formData.append('slotTime',          sortedSlots.join(' - '));
+      formData.append('date',              selectedDate.full);
+      formData.append('duration',          String(selectedDuration.value));
+      formData.append('numberOfPlayers',   String(players));
+      formData.append('notes',             notes);
+      formData.append('totalAmount',       String(totalAmount));
       formData.append('paymentScreenshot', {
         uri:  image.uri,
         type: image.type || 'image/jpeg',
@@ -219,24 +249,23 @@ const BookSlotScreen = ({ navigation }: any) => {
       showToast('Booking submitted! Awaiting admin approval.', 'success');
       setTimeout(() => navigation.goBack(), 1800);
     } catch (err: any) {
-      const msg = err?.response?.data?.message || 'Booking failed';
       setPaymentModal(false);
-      showToast(msg, 'error');
+      showToast(err?.response?.data?.message || 'Booking failed', 'error');
     } finally {
       setLoading(false);
     }
   };
 
   const sortedSelected = [...selectedSlots].sort((a, b) => ALL_SLOTS.indexOf(a) - ALL_SLOTS.indexOf(b));
+  const canGoBack      = navigation.canGoBack ? navigation.canGoBack() : false;
 
-  const canGoBack = navigation.canGoBack ? navigation.canGoBack() : false;
-
+  // ── Render ─────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
-      {/* ── Header ── */}
-      <View style={styles.header}>
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         {canGoBack ? (
           <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
             <Icon name="arrow-back" size={22} color="#111" />
@@ -245,18 +274,19 @@ const BookSlotScreen = ({ navigation }: any) => {
           <View style={styles.backBtn} />
         )}
         <Text style={styles.headerTitle}>Booking</Text>
-        <TouchableOpacity
-          style={styles.myBookingsBtn}
-          onPress={() => navigation.navigate('Bookings')}
-        >
+        <TouchableOpacity style={styles.myBookingsBtn} onPress={() => navigation.navigate('Bookings')}>
           <Icon name="calendar-outline" size={15} color="#0A8F3C" />
           <Text style={styles.myBookingsText}>My Bookings</Text>
         </TouchableOpacity>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 110 }}>
+      {/* Scrollable content — paddingBottom clears the bottom bar */}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
 
-        {/* ── Ground Card ── */}
+        {/* Ground Card */}
         <View style={styles.groundCard}>
           <Image
             source={{ uri: 'https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?w=400' }}
@@ -280,12 +310,14 @@ const BookSlotScreen = ({ navigation }: any) => {
 
         {/* ── 1. Select Date ── */}
         <View style={styles.section}>
+          {/* month label — NO dropdown chevron */}
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>1. Select Date</Text>
             <View style={styles.monthBadge}>
               <Icon name="calendar-outline" size={13} color="#0A8F3C" />
-              <Text style={styles.monthText}>{selectedDate.monthName} {selectedDate.year}</Text>
-              <Icon name="chevron-down" size={13} color="#0A8F3C" />
+              <Text style={styles.monthText}>
+                {selectedDate.monthName} {selectedDate.year}
+              </Text>
             </View>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -306,7 +338,7 @@ const BookSlotScreen = ({ navigation }: any) => {
           </ScrollView>
         </View>
 
-        {/* ── 2. Select Time Slot ── */}
+        {/* ── 2. Select Time Slot (4 PM – 1 AM) ── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>2. Select Time Slot</Text>
           <Text style={styles.sectionHint}>
@@ -340,12 +372,14 @@ const BookSlotScreen = ({ navigation }: any) => {
           {selectedSlots.length > 0 && (
             <View style={styles.selectedSlotInfo}>
               <Icon name="time-outline" size={14} color="#0A8F3C" />
-              <Text style={styles.selectedSlotText}>Selected: {sortedSelected.join(' → ')}</Text>
+              <Text style={styles.selectedSlotText}>
+                Selected: {sortedSelected.join(' → ')}
+              </Text>
             </View>
           )}
         </View>
 
-        {/* ── 3. Duration ── */}
+        {/* ── 3. Duration (1 / 2 / 3 / 4 Hours only, max 4) ── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>3. Duration</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -371,50 +405,77 @@ const BookSlotScreen = ({ navigation }: any) => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>4. Booking Details</Text>
 
-          <View style={styles.fieldRow}>
-            <Icon name="person-outline" size={18} color="#AAAAAA" />
+          {/* Name — max 50 chars, error shown only when exceeded */}
+          <View style={[styles.fieldRow, nameError ? styles.fieldRowError : null]}>
+            <Icon name="person-outline" size={18} color={nameError ? '#EF4444' : '#AAAAAA'} />
             <TextInput
               style={styles.fieldInput}
               placeholder="Full Name"
               placeholderTextColor="#BBBBBB"
               value={name}
-              onChangeText={setName}
+              onChangeText={handleNameChange}
+              maxLength={MAX_NAME + 5}   // allow typing a little over so error shows, not silently cut
+              returnKeyType="next"
             />
           </View>
+          {!!nameError && (
+            <View style={styles.fieldErrorRow}>
+              <Icon name="alert-circle-outline" size={13} color="#EF4444" />
+              <Text style={styles.fieldErrorText}>{nameError}</Text>
+            </View>
+          )}
 
-          <View style={styles.fieldRow}>
-            <Icon name="call-outline" size={18} color="#AAAAAA" />
+          {/* Phone — max 11 digits, digits only, error shown only when exceeded */}
+          <View style={[styles.fieldRow, phoneError ? styles.fieldRowError : null]}>
+            <Icon name="call-outline" size={18} color={phoneError ? '#EF4444' : '#AAAAAA'} />
             <TextInput
               style={styles.fieldInput}
               placeholder="Phone Number"
               placeholderTextColor="#BBBBBB"
               keyboardType="phone-pad"
               value={phone}
-              onChangeText={setPhone}
+              onChangeText={handlePhoneChange}
+              maxLength={MAX_PHONE + 2}  // allow a couple extra digits so error shows
             />
           </View>
+          {!!phoneError && (
+            <View style={styles.fieldErrorRow}>
+              <Icon name="alert-circle-outline" size={13} color="#EF4444" />
+              <Text style={styles.fieldErrorText}>{phoneError}</Text>
+            </View>
+          )}
 
+          {/* Players — max 22 */}
           <View style={styles.fieldRow}>
             <Icon name="people-outline" size={18} color="#AAAAAA" />
             <Text style={styles.fieldLabel}>No. of Players</Text>
             <View style={styles.counter}>
               <TouchableOpacity
-                style={styles.counterBtn}
+                style={[styles.counterBtn, players <= 1 && styles.counterBtnDisabled]}
                 onPress={() => setPlayers(p => Math.max(1, p - 1))}
+                disabled={players <= 1}
               >
-                <Text style={styles.counterBtnText}>−</Text>
+                <Text style={[styles.counterBtnText, players <= 1 && styles.counterBtnTextDisabled]}>−</Text>
               </TouchableOpacity>
               <Text style={styles.counterVal}>{players}</Text>
               <TouchableOpacity
-                style={styles.counterBtn}
-                onPress={() => setPlayers(p => Math.min(22, p + 1))}
+                style={[styles.counterBtn, players >= MAX_PLAYERS && styles.counterBtnDisabled]}
+                onPress={() => setPlayers(p => Math.min(MAX_PLAYERS, p + 1))}
+                disabled={players >= MAX_PLAYERS}
               >
-                <Text style={styles.counterBtnText}>+</Text>
+                <Text style={[styles.counterBtnText, players >= MAX_PLAYERS && styles.counterBtnTextDisabled]}>+</Text>
               </TouchableOpacity>
             </View>
           </View>
+          {players >= MAX_PLAYERS && (
+            <View style={styles.fieldErrorRow}>
+              <Icon name="information-circle-outline" size={13} color="#F59E0B" />
+              <Text style={[styles.fieldErrorText, { color: '#F59E0B' }]}>Maximum {MAX_PLAYERS} players allowed</Text>
+            </View>
+          )}
 
-          <View style={styles.fieldRow}>
+          {/* Notes */}
+          <View style={[styles.fieldRow, { borderBottomWidth: 0 }]}>
             <Icon name="document-text-outline" size={18} color="#AAAAAA" />
             <TextInput
               style={styles.fieldInput}
@@ -431,7 +492,7 @@ const BookSlotScreen = ({ navigation }: any) => {
           <Text style={styles.sectionTitle}>Payment Summary</Text>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>
-              Price (PKR {PRICE_PER_HOUR.toLocaleString()} x {selectedDuration.value} Hour{selectedDuration.value !== 1 ? 's' : ''})
+              Price (PKR {PRICE_PER_HOUR.toLocaleString()} × {selectedDuration.value} Hour{selectedDuration.value !== 1 ? 's' : ''})
             </Text>
             <Text style={styles.summaryVal}>PKR {totalAmount.toLocaleString()}</Text>
           </View>
@@ -521,16 +582,19 @@ const BookSlotScreen = ({ navigation }: any) => {
 
 export default BookSlotScreen;
 
+// ─────────────────────────────────────────────────────────────────
+const SB_HEIGHT = StatusBar.currentHeight ?? 24;
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F6F7FB' },
 
-  // Header — flush to top, no extra paddingTop on Android
+  // Header — correct top padding, no excess margin
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 54 : (StatusBar.currentHeight ?? 24) + 8,
+    paddingTop: 10,
     paddingBottom: 14,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
@@ -548,6 +612,11 @@ const styles = StyleSheet.create({
     borderRadius: 20, borderWidth: 1, borderColor: '#C8EDD8',
   },
   myBookingsText: { fontSize: 12, color: '#0A8F3C', fontWeight: '600' },
+
+  // ScrollView — extra bottom padding so last section clears the bottom bar
+  scrollContent: {
+    paddingBottom: Platform.OS === 'ios' ? 180 : 150,
+  },
 
   // Ground Card
   groundCard: {
@@ -574,8 +643,13 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
   sectionTitle:  { fontSize: 15, fontWeight: '800', color: '#111', marginBottom: 14 },
   sectionHint:   { fontSize: 12, color: '#888', marginTop: -10, marginBottom: 12 },
-  monthBadge:    { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F0FFF6', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
-  monthText:     { fontSize: 12, color: '#0A8F3C', fontWeight: '600' },
+
+  // Month badge — no chevron
+  monthBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: '#F0FFF6', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20,
+  },
+  monthText: { fontSize: 12, color: '#0A8F3C', fontWeight: '600' },
 
   // Date cards
   dayCard:       { alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, borderRadius: 14, borderWidth: 1.5, borderColor: '#EBEBEB', marginRight: 8, minWidth: 66 },
@@ -606,12 +680,21 @@ const styles = StyleSheet.create({
 
   // Fields
   fieldRow:      { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  fieldRowError: { borderBottomColor: '#FFCCCC' },
   fieldLabel:    { flex: 1, marginLeft: 12, fontSize: 14, color: '#444' },
   fieldInput:    { flex: 1, marginLeft: 12, fontSize: 14, color: '#111', padding: 0 },
-  counter:       { flexDirection: 'row', alignItems: 'center' },
-  counterBtn:    { width: 30, height: 30, borderRadius: 15, borderWidth: 1.5, borderColor: '#DDDDDD', alignItems: 'center', justifyContent: 'center' },
-  counterBtnText:{ fontSize: 18, color: '#333', lineHeight: 20 },
-  counterVal:    { marginHorizontal: 14, fontSize: 16, fontWeight: '700', color: '#111' },
+
+  // Inline field error
+  fieldErrorRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4, marginBottom: 2, paddingLeft: 4 },
+  fieldErrorText:{ fontSize: 12, color: '#EF4444' },
+
+  // Counter
+  counter:              { flexDirection: 'row', alignItems: 'center' },
+  counterBtn:           { width: 30, height: 30, borderRadius: 15, borderWidth: 1.5, borderColor: '#DDDDDD', alignItems: 'center', justifyContent: 'center' },
+  counterBtnDisabled:   { borderColor: '#EEEEEE', backgroundColor: '#FAFAFA' },
+  counterBtnText:       { fontSize: 18, color: '#333', lineHeight: 20 },
+  counterBtnTextDisabled:{ color: '#CCCCCC' },
+  counterVal:           { marginHorizontal: 14, fontSize: 16, fontWeight: '700', color: '#111' },
 
   // Summary
   summaryRow:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6 },
@@ -621,17 +704,18 @@ const styles = StyleSheet.create({
   totalLabel:  { fontSize: 15, fontWeight: '700', color: '#111' },
   totalVal:    { fontSize: 18, fontWeight: '900', color: '#0A8F3C' },
 
-  // Bottom bar
+  // Bottom bar — sits above tab bar naturally via elevation; paddingBottom adds safe gap
   bottomBar: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
+    position: 'absolute', bottom: Platform.OS === 'ios' ? 85 : 65, left: 0, right: 0,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: '#fff', paddingHorizontal: 20, paddingVertical: 16,
-    paddingBottom: Platform.OS === 'ios' ? 30 : 16,
+    backgroundColor: '#fff',
+    paddingHorizontal: 20, paddingTop: 14,
+    paddingBottom: 12,
     borderTopWidth: 1, borderTopColor: '#F0F0F0', elevation: 12,
   },
-  bottomLabel:  { fontSize: 12, color: '#999', marginBottom: 2 },
-  bottomAmount: { fontSize: 22, fontWeight: '900', color: '#0A8F3C' },
-  confirmBtn:   { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#0A8F3C', paddingHorizontal: 22, paddingVertical: 15, borderRadius: 14 },
+  bottomLabel:   { fontSize: 12, color: '#999', marginBottom: 2 },
+  bottomAmount:  { fontSize: 22, fontWeight: '900', color: '#0A8F3C' },
+  confirmBtn:    { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#0A8F3C', paddingHorizontal: 22, paddingVertical: 15, borderRadius: 14 },
   confirmBtnText:{ color: '#fff', fontWeight: '800', fontSize: 15 },
 
   // Modal
@@ -651,9 +735,9 @@ const styles = StyleSheet.create({
   uploadBtnText: { color: '#0A8F3C', fontWeight: '700', fontSize: 14 },
   previewImg:    { width: '100%', height: 150, borderRadius: 12, marginBottom: 16 },
 
-  modalActions:   { flexDirection: 'row', gap: 12 },
-  cancelBtn:      { flex: 1, padding: 15, borderRadius: 14, borderWidth: 1.5, borderColor: '#E0E0E0', alignItems: 'center' },
-  cancelBtnText:  { color: '#666', fontWeight: '700', fontSize: 14 },
-  submitBtn:      { flex: 2, padding: 15, borderRadius: 14, backgroundColor: '#0A8F3C', alignItems: 'center' },
-  submitBtnText:  { color: '#fff', fontWeight: '800', fontSize: 15 },
+  modalActions:  { flexDirection: 'row', gap: 12 },
+  cancelBtn:     { flex: 1, padding: 15, borderRadius: 14, borderWidth: 1.5, borderColor: '#E0E0E0', alignItems: 'center' },
+  cancelBtnText: { color: '#666', fontWeight: '700', fontSize: 14 },
+  submitBtn:     { flex: 2, padding: 15, borderRadius: 14, backgroundColor: '#0A8F3C', alignItems: 'center' },
+  submitBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
 });

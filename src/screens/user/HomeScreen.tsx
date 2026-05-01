@@ -1,242 +1,529 @@
-import React from 'react';
+import React, { useEffect, useCallback, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Image, ScrollView, Platform, StatusBar,
+  Image, ScrollView, Platform, StatusBar, ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useDispatch, useSelector } from 'react-redux';
 
-const GROUND_IMAGE = 'https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?w=600';
+import socket from '../../socket/socket';
+import { getBookings } from '../../services/bookingService';
+import { setBookings, addBooking, updateBooking, Booking } from '../../store/slices/bookingSlice';
+import { RootState } from '../../store';
 
-const FEATURES = [
-  { icon: 'leaf-outline',       label: 'Turf'          },
-  { icon: 'flashlight-outline', label: 'Flood Light'   },
-  { icon: 'car-outline',        label: 'Parking'       },
-  { icon: 'shirt-outline',      label: 'Changing Room' },
+// ── Constants ──────────────────────────────────────────────────────────────
+const GREEN     = '#0A8F3C';
+const BG        = '#F7F8FA';
+const SCREEN_W  = Dimensions.get('window').width;
+const HERO_W    = SCREEN_W - 28; // marginHorizontal: 14 each side
+
+const GROUND_IMAGES = [
+  {
+    uri:      'https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?w=800',
+    name:     'Green Field Arena',
+    location: 'Lahore, Punjab',
+  },
+  {
+    uri:      'https://images.unsplash.com/photo-1624526267942-ab0ff8a3e972?w=800',
+    name:     'Main Cricket Ground',
+    location: 'Lahore, Punjab',
+  },
+  {
+    uri:      'https://images.unsplash.com/photo-1531415074968-036ba1b575da?w=800',
+    name:     'Practice Nets Arena',
+    location: 'Lahore, Punjab',
+  },
 ];
 
 const QUICK_STATS = [
-  { icon: 'time-outline',     label: 'Hours Open',    value: '6AM–10PM' },
-  { icon: 'people-outline',   label: 'Max Players',   value: '22'       },
-  { icon: 'cash-outline',     label: 'Per Hour',      value: 'PKR 1,200'},
-  { icon: 'star-outline',     label: 'Rating',        value: '4.8 ★'    },
+  { icon: 'time-outline',   label: 'Hours Open',  value: '6AM–10PM',  star: false },
+  { icon: 'people-outline', label: 'Max Players', value: '22',         star: false },
+  { icon: 'cash-outline',   label: 'Per Hour',    value: 'PKR 1,200', star: false },
+  { icon: 'star',           label: 'Rating',      value: '4.8',       star: true  },
 ];
 
-const HomeScreen = ({ navigation }: any) => {
+const STATUS_LABEL: Record<string, string> = { pending: 'Pending', approved: 'Confirmed', rejected: 'Cancelled', completed: 'Completed' };
+const STATUS_COLOR: Record<string, string> = { pending: '#F59E0B', approved: GREEN,       rejected: '#EF4444',  completed: '#888'      };
+const STATUS_BG:    Record<string, string> = { pending: '#FFF8EC', approved: '#EAF7EE',   rejected: '#FFF0F0',  completed: '#F3F3F3'   };
+
+const parseDate = (dateStr: string) => {
+  if (!dateStr) return { day: '', date: '', month: '' };
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) {
+    const parts = dateStr.split(' ');
+    return { date: parts[0] ?? '', month: (parts[1] ?? '').toUpperCase(), day: '' };
+  }
+  const days   = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  return { day: days[d.getDay()], date: String(d.getDate()), month: months[d.getMonth()] };
+};
+
+// ── Booking Card ───────────────────────────────────────────────────────────
+const BookingCard = ({ item, onPress }: { item: Booking; onPress: () => void }) => {
+  const { day, date, month } = parseDate(item.date);
+  const label = STATUS_LABEL[item.status] ?? item.status;
+  const color = STATUS_COLOR[item.status] ?? '#888';
+  const bg    = STATUS_BG[item.status]    ?? '#F5F5F5';
+
+  const slotParts   = item.slotTime?.split(' - ') ?? [];
+  const timeDisplay = slotParts.length > 1
+    ? `${slotParts[0]} – ${slotParts[slotParts.length - 1]}`
+    : item.slotTime;
+
+  const matchLabel = item.duration <= 1 ? 'Morning Match'
+    : item.duration <= 2 ? 'Evening Match'
+    : 'Full Day Match';
+
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+    <TouchableOpacity style={s.bookCard} activeOpacity={0.8} onPress={onPress}>
 
-      <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
+      {/* Date column */}
+      <View style={s.bookDateCol}>
+        <Text style={s.bookDay}>{day}</Text>
+        <Text style={s.bookDate}>{date}</Text>
+        <Text style={s.bookMonth}>{month}</Text>
+      </View>
 
-        {/* ── Hero Image ── */}
-        <View style={styles.heroWrap}>
-          <Image source={{ uri: GROUND_IMAGE }} style={styles.heroImage} />
-          <View style={styles.heroOverlay} />
+      <View style={s.bookDivider} />
 
-          {/* Top bar over image */}
-          <View style={styles.heroTop}>
-            <View>
-              <Text style={styles.heroGreeting}>Welcome back!</Text>
-              <Text style={styles.heroAppName}>Cricket Club</Text>
-            </View>
-            <View style={styles.notifBtn}>
-              <Icon name="notifications-outline" size={22} color="#fff" />
-            </View>
+      {/* Info */}
+      <View style={s.bookInfo}>
+        <Text style={s.bookTitle}>{matchLabel}</Text>
+        <View style={s.bookMetaRow}>
+          <Icon name="time-outline" size={11} color="#C0C0C0" />
+          <Text style={s.bookMeta}>{timeDisplay}</Text>
+        </View>
+        <View style={s.bookMetaRow}>
+          <Icon name="people-outline" size={11} color="#C0C0C0" />
+          <Text style={s.bookMeta}>{item.numberOfPlayers} / 22 Players</Text>
+        </View>
+      </View>
+
+      {/* Status + amount */}
+      <View style={s.bookRight}>
+        <View style={[s.statusChip, { backgroundColor: bg }]}>
+          <Text style={[s.statusChipText, { color }]}>{label}</Text>
+          {(item.status === 'approved' || item.status === 'completed') && (
+            <Icon name="checkmark" size={9} color={color} />
+          )}
+        </View>
+        <View style={s.bookAmountRow}>
+          <Text style={s.bookAmount}>PKR {Number(item.totalAmount).toLocaleString()}</Text>
+          <Icon name="chevron-forward" size={12} color="#DDD" />
+        </View>
+      </View>
+
+    </TouchableOpacity>
+  );
+};
+
+// ── HomeScreen ─────────────────────────────────────────────────────────────
+const HomeScreen = ({ navigation }: any) => {
+  const dispatch       = useDispatch();
+  const bookings       = useSelector((state: RootState) => state.booking.bookings);
+  const loading        = useSelector((state: RootState) => (state as any).booking.homeLoading ?? false);
+  const userName       = useSelector((state: RootState) => (state as any).auth.userName);
+  const insets         = useSafeAreaInsets();
+
+  // Slider
+  const sliderRef    = useRef<ScrollView>(null);
+  const [slideIdx, setSlideIdx] = useState(0);
+
+  // Only 3 most recent bookings
+  const recentBookings = bookings.slice(0, 3);
+
+  // Auto-advance slider every 3 seconds
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setSlideIdx(prev => {
+        const next = (prev + 1) % GROUND_IMAGES.length;
+        sliderRef.current?.scrollTo({ x: next * HERO_W, animated: true });
+        return next;
+      });
+    }, 3000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const loadBookings = useCallback(async () => {
+    try {
+      const data = await getBookings();
+      dispatch(setBookings(data));
+    } catch (e) {}
+  }, [dispatch]);
+
+  useEffect(() => {
+    loadBookings();
+    const onNew    = (b: Booking) => dispatch(addBooking(b));
+    const onUpdate = (b: Booking) => dispatch(updateBooking(b));
+    socket.on('bookingCreated', onNew);
+    socket.on('bookingUpdated', onUpdate);
+    return () => { socket.off('bookingCreated', onNew); socket.off('bookingUpdated', onUpdate); };
+  }, []);
+
+  return (
+    <View style={s.root}>
+      <StatusBar barStyle="dark-content" backgroundColor={BG} />
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[s.scroll, { paddingBottom: Platform.OS === 'ios' ? 100 : 80 }]}
+        bounces={false}
+        contentInsetAdjustmentBehavior="never"
+      >
+
+        {/* ── Header — top padding uses real safe area inset ── */}
+        <View style={[s.header, { paddingTop: insets.top + 6 }]}>
+          <View>
+            <Text style={s.greeting}>Welcome back{userName ? `, ${userName}` : ''}!</Text>
+            <Text style={s.headerTitle}>Cricket Club</Text>
           </View>
+          <TouchableOpacity style={s.notifBtn} activeOpacity={0.7}>
+            <Icon name="notifications-outline" size={20} color="#333" />
+            <View style={s.notifDot} />
+          </TouchableOpacity>
+        </View>
 
-          {/* Ground name over image */}
-          <View style={styles.heroBottom}>
-            <Text style={styles.heroGroundName}>Green Field Arena</Text>
-            <View style={styles.heroLocationRow}>
-              <Icon name="location-outline" size={14} color="rgba(255,255,255,0.85)" />
-              <Text style={styles.heroLocation}>Lahore, Punjab</Text>
-            </View>
+        {/* ── Hero Slider ── */}
+        <View style={s.heroWrap}>
+          <ScrollView
+            ref={sliderRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            scrollEventThrottle={16}
+            onMomentumScrollEnd={e => {
+              const idx = Math.round(e.nativeEvent.contentOffset.x / HERO_W);
+              setSlideIdx(idx);
+            }}
+            style={{ width: HERO_W, height: 185, borderRadius: 16 }}
+            contentContainerStyle={{ borderRadius: 16 }}
+          >
+            {GROUND_IMAGES.map((img, i) => (
+              <View key={i} style={{ width: HERO_W, height: 185, overflow: 'hidden', borderRadius: 16 }}>
+                <Image source={{ uri: img.uri }} style={s.heroImg} />
+                <View style={s.heroOverlay} />
+                <View style={s.heroBottom}>
+                  <Text style={s.heroName}>{img.name}</Text>
+                  <View style={s.heroLocRow}>
+                    <Icon name="location-outline" size={12} color="rgba(255,255,255,0.85)" />
+                    <Text style={s.heroLoc}>{img.location}</Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </ScrollView>
+
+          {/* Dots */}
+          <View style={s.heroDots}>
+            {GROUND_IMAGES.map((_, i) => (
+              <View key={i} style={[s.dot, i === slideIdx && s.dotActive]} />
+            ))}
           </View>
         </View>
 
-        {/* ── Features tags ── */}
-        <View style={styles.featuresRow}>
-          {FEATURES.map(f => (
-            <View key={f.label} style={styles.featureTag}>
-              <Icon name={f.icon} size={14} color="#0A8F3C" />
-              <Text style={styles.featureLabel}>{f.label}</Text>
-            </View>
-          ))}
-        </View>
-
-        {/* ── Quick Stats ── */}
-        <View style={styles.statsGrid}>
-          {QUICK_STATS.map(s => (
-            <View key={s.label} style={styles.statCard}>
-              <Icon name={s.icon} size={20} color="#0A8F3C" />
-              <Text style={styles.statValue}>{s.value}</Text>
-              <Text style={styles.statLabel}>{s.label}</Text>
-            </View>
+        {/* ── Stats ── */}
+        <View style={s.statsCard}>
+          {QUICK_STATS.map((stat, i) => (
+            <React.Fragment key={stat.label}>
+              <View style={s.statItem}>
+                <Icon
+                  name={stat.star ? 'star' : stat.icon}
+                  size={18}
+                  color={GREEN}
+                />
+                <Text style={s.statLabel}>{stat.label}</Text>
+                <View style={s.statValueRow}>
+                  <Text style={s.statValue}>{stat.value}</Text>
+                  {stat.star && (
+                    <Icon name="star" size={9} color={GREEN} style={{ marginLeft: 2, marginTop: 2 }} />
+                  )}
+                </View>
+              </View>
+              {i < QUICK_STATS.length - 1 && <View style={s.statDiv} />}
+            </React.Fragment>
           ))}
         </View>
 
         {/* ── Book Now Banner ── */}
         <TouchableOpacity
-          style={styles.bookBanner}
-          activeOpacity={0.88}
-          onPress={() => navigation.navigate('BookSlot')}
+          style={s.bookBanner}
+          activeOpacity={0.9}
+          onPress={() => navigation.navigate('BookNow')}
         >
-          <View>
-            <Text style={styles.bookBannerTitle}>Ready to play?</Text>
-            <Text style={styles.bookBannerSub}>Book your slot in seconds</Text>
+          <View style={s.bookBannerLeft}>
+            <View style={s.bookIconBox}>
+              <Icon name="calendar-outline" size={20} color="#fff" />
+            </View>
+            <View>
+              <Text style={s.bookBannerTitle}>Ready to play?</Text>
+              <Text style={s.bookBannerSub}>Book your slot in seconds</Text>
+            </View>
           </View>
-          <View style={styles.bookBannerBtn}>
-            <Icon name="calendar-outline" size={18} color="#fff" />
-            <Text style={styles.bookBannerBtnText}>Book Now</Text>
+          <View style={s.bookNowBtn}>
+            <Text style={s.bookNowText}>Book Now</Text>
+            <Icon name="chevron-forward" size={13} color="#fff" />
           </View>
         </TouchableOpacity>
 
-        {/* ── About Section ── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>About the Ground</Text>
-          <Text style={styles.aboutText}>
-            Green Field Arena is a premium cricket facility located in the heart of Lahore.
-            With professional turf, floodlights, and ample parking, it's the perfect venue
-            for your cricket matches, tournaments, and practice sessions.
-          </Text>
+        {/* ── Your Bookings ── */}
+        <View style={s.sectionHead}>
+          <Text style={s.sectionTitle}>Your Bookings</Text>
+          <TouchableOpacity style={s.viewAllBtn} onPress={() => navigation.navigate('Bookings')}>
+            <Text style={s.viewAllText}>View All</Text>
+            <Icon name="chevron-forward" size={13} color={GREEN} />
+          </TouchableOpacity>
         </View>
 
-        {/* ── How It Works ── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>How It Works</Text>
-          {[
-            { n: '1', t: 'Select a Date & Time',   s: 'Choose your preferred slot from available timings' },
-            { n: '2', t: 'Fill Booking Details',    s: 'Enter your name, phone and number of players'       },
-            { n: '3', t: 'Make Payment',             s: 'Transfer fee and upload screenshot as proof'        },
-            { n: '4', t: 'Get Confirmation',         s: 'Admin approves and your booking is confirmed!'      },
-          ].map(step => (
-            <View key={step.n} style={styles.step}>
-              <View style={styles.stepNum}>
-                <Text style={styles.stepNumText}>{step.n}</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.stepTitle}>{step.t}</Text>
-                <Text style={styles.stepSub}>{step.s}</Text>
-              </View>
+        {loading && bookings.length === 0 ? (
+          <ActivityIndicator color={GREEN} style={{ marginVertical: 20 }} />
+        ) : recentBookings.length === 0 ? (
+          <View style={s.emptyWrap}>
+            <View style={s.emptyIconWrap}>
+              <Icon name="calendar-outline" size={28} color={GREEN} />
             </View>
-          ))}
-        </View>
+            <Text style={s.emptyTitle}>No upcoming bookings</Text>
+            <Text style={s.emptySub}>Tap "Book Now" to reserve your slot</Text>
+          </View>
+        ) : (
+          recentBookings.map(b => (
+            <BookingCard key={b._id} item={b} onPress={() => navigation.navigate('Bookings')} />
+          ))
+        )}
 
-        <View style={{ height: 24 }} />
       </ScrollView>
-
-      {/* ── Floating Book Button ── */}
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => navigation.navigate('BookSlot')}
-        activeOpacity={0.88}
-      >
-        <Icon name="add" size={28} color="#fff" />
-      </TouchableOpacity>
     </View>
   );
 };
 
 export default HomeScreen;
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F6F7FB' },
-
-  // Hero
-  heroWrap:    { height: 260, position: 'relative' },
-  heroImage:   { width: '100%', height: '100%', resizeMode: 'cover' },
-heroOverlay: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.42)' },
-  heroTop: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 54 : (StatusBar.currentHeight ?? 24) + 8,
-    left: 20, right: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+// ── Styles ─────────────────────────────────────────────────────────────────
+const s = StyleSheet.create({
+  root:   { flex: 1, backgroundColor: BG },
+  scroll: {
+    paddingBottom: 0,
   },
-  heroGreeting: { fontSize: 13, color: 'rgba(255,255,255,0.8)', fontWeight: '500' },
-  heroAppName:  { fontSize: 22, color: '#fff', fontWeight: '900' },
+
+  // ── Header ──────────────────────────────────────────────────────────────
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingBottom: 10,
+    backgroundColor: BG,
+  },
+  greeting: {
+    fontSize: 12,
+    color: GREEN,
+    fontWeight: '500',
+    letterSpacing: 0.1,
+    marginBottom: 2,
+  },
+  headerTitle: {
+    fontSize: 21,
+    fontWeight: '800',
+    color: '#1A1A1A',
+    letterSpacing: -0.4,
+  },
   notifBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: '#fff',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: '#EBEBEB',
+    shadowColor: '#000', shadowOpacity: 0.04,
+    shadowOffset: { width: 0, height: 1 }, shadowRadius: 3, elevation: 1,
+  },
+  notifDot: {
+    position: 'absolute', top: 7, right: 7,
+    width: 6, height: 6, borderRadius: 3,
+    backgroundColor: GREEN, borderWidth: 1.5, borderColor: '#fff',
+  },
+
+  // ── Hero ────────────────────────────────────────────────────────────────
+  heroWrap: {
+    marginHorizontal: 14,
+    marginTop: 4,
+    borderRadius: 16,
+    height: 185,
+    overflow: 'hidden',  // clips the slider images to rounded corners
+  },
+  heroImg:     { width: '100%', height: '100%', resizeMode: 'cover' },
+  heroOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.38)' },
+  heroDots: {
+    position: 'absolute',
+    bottom: 10,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 5,
+    zIndex: 10,
+  },
+  dot:       { width: 7, height: 7, borderRadius: 3.5, backgroundColor: 'rgba(255,255,255,0.4)' },
+  dotActive: { backgroundColor: GREEN, width: 18, borderRadius: 4 },
+  heroBottom:{ position: 'absolute', bottom: 30, left: 14, zIndex: 10 },
+  heroName: {
+    fontSize: 19,
+    fontWeight: '800',
+    color: '#fff',
+    letterSpacing: -0.2,
+    marginBottom: 4,
+  },
+  heroLocRow:{ flexDirection: 'row', alignItems: 'center', gap: 3 },
+  heroLoc:   { fontSize: 11.5, color: 'rgba(255,255,255,0.88)', fontWeight: '500' },
+
+  // ── Stats ────────────────────────────────────────────────────────────────
+  statsCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    marginHorizontal: 14,
+    marginTop: 10,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowOffset: { width: 0, height: 1 },
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  statItem: { flex: 1, alignItems: 'center', gap: 5 },
+  statLabel: {
+    fontSize: 9.5,
+    color: '#BBBBBB',
+    textAlign: 'center',
+    fontWeight: '400',
+    letterSpacing: 0.1,
+  },
+  statValueRow: { flexDirection: 'row', alignItems: 'center' },
+  statValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1A1A1A',
+  },
+  statDiv: { width: 1, height: 34, backgroundColor: '#F0F0F0' },
+
+  // ── Book Now Banner ──────────────────────────────────────────────────────
+  bookBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: GREEN,
+    marginHorizontal: 14,
+    marginTop: 10,
+    borderRadius: 14,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+    shadowColor: GREEN,
+    shadowOpacity: 0.22,
+    shadowOffset: { width: 0, height: 3 },
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  bookBannerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  bookIconBox: {
+    width: 36, height: 36, borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center', justifyContent: 'center',
   },
-
-  heroBottom: {
-    position: 'absolute',
-    bottom: 20, left: 20, right: 20,
+  bookBannerTitle: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: -0.1,
   },
-  heroGroundName: { fontSize: 24, fontWeight: '900', color: '#fff', marginBottom: 4 },
-  heroLocationRow:{ flexDirection: 'row', alignItems: 'center', gap: 4 },
-  heroLocation:   { fontSize: 13, color: 'rgba(255,255,255,0.85)', fontWeight: '500' },
+  bookBannerSub: {
+    fontSize: 10.5,
+    color: 'rgba(255,255,255,0.78)',
+    marginTop: 1,
+  },
+  bookNowBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.4)',
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  bookNowText: { color: '#fff', fontWeight: '700', fontSize: 12 },
 
-  // Features
-  featuresRow: {
-    flexDirection: 'row', flexWrap: 'wrap', gap: 8,
-    paddingHorizontal: 16, paddingVertical: 14,
+  // ── Section header ───────────────────────────────────────────────────────
+  sectionHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  sectionTitle: { fontSize: 15.5, fontWeight: '700', color: '#1A1A1A' },
+  viewAllBtn:   { flexDirection: 'row', alignItems: 'center', gap: 1 },
+  viewAllText:  { fontSize: 12, color: GREEN, fontWeight: '600' },
+
+  // ── Booking card ─────────────────────────────────────────────────────────
+  bookCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#fff',
-    borderBottomWidth: 1, borderBottomColor: '#F0F0F0',
+    marginHorizontal: 14,
+    marginBottom: 10,
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 6,
+    elevation: 2,
   },
-  featureTag: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    backgroundColor: '#F0FFF6', paddingHorizontal: 10, paddingVertical: 5,
-    borderRadius: 20, borderWidth: 1, borderColor: '#C8EDD8',
+  bookDateCol: {
+    width: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EAF7EE',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
   },
-  featureLabel: { fontSize: 12, color: '#0A8F3C', fontWeight: '600' },
+  bookDay:   { fontSize: 9, fontWeight: '700', color: GREEN, textTransform: 'uppercase', letterSpacing: 0.5 },
+  bookDate:  { fontSize: 24, fontWeight: '900', color: '#1A1A1A', lineHeight: 28 },
+  bookMonth: { fontSize: 9, fontWeight: '600', color: '#BBBBBB', textTransform: 'uppercase', letterSpacing: 0.5 },
 
-  // Stats
-  statsGrid: {
-    flexDirection: 'row', flexWrap: 'wrap',
-    padding: 12, gap: 10,
-  },
-  statCard: {
-    width: '47%', backgroundColor: '#fff', borderRadius: 14,
-    padding: 14, alignItems: 'center', gap: 4,
-    elevation: 1, shadowColor: '#000', shadowOpacity: 0.04,
-    shadowOffset: { width: 0, height: 1 }, shadowRadius: 4,
-  },
-  statValue: { fontSize: 16, fontWeight: '800', color: '#111' },
-  statLabel: { fontSize: 11, color: '#888' },
+  bookDivider: { width: 1, height: 44, backgroundColor: '#F0F0F0', marginHorizontal: 12 },
 
-  // Book Banner
-  bookBanner: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    backgroundColor: '#0A8F3C', marginHorizontal: 16, marginBottom: 12,
-    borderRadius: 16, padding: 18,
-    elevation: 4, shadowColor: '#0A8F3C', shadowOpacity: 0.3,
-    shadowOffset: { width: 0, height: 4 }, shadowRadius: 8,
-  },
-  bookBannerTitle:   { fontSize: 18, fontWeight: '900', color: '#fff' },
-  bookBannerSub:     { fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
-  bookBannerBtn:     { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 25 },
-  bookBannerBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  bookInfo:   { flex: 1 },
+  bookTitle:  { fontSize: 14, fontWeight: '700', color: '#1A1A1A', marginBottom: 6, letterSpacing: -0.1 },
+  bookMetaRow:{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 },
+  bookMeta:   { fontSize: 11, color: '#AAAAAA', fontWeight: '400' },
 
-  // Section
-  section: {
-    backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 12,
-    borderRadius: 16, padding: 16,
-    elevation: 1, shadowColor: '#000', shadowOpacity: 0.04,
-    shadowOffset: { width: 0, height: 1 }, shadowRadius: 4,
+  bookRight:  { alignItems: 'flex-end', justifyContent: 'center', gap: 6, paddingLeft: 4 },
+  statusChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20,
   },
-  sectionTitle: { fontSize: 16, fontWeight: '800', color: '#111', marginBottom: 12 },
-  aboutText:    { fontSize: 13, color: '#666', lineHeight: 20 },
+  statusChipText: { fontSize: 11, fontWeight: '700' },
+  bookAmountRow:  { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  bookAmount: { fontSize: 13, fontWeight: '800', color: '#1A1A1A' },
 
-  // Steps
-  step: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 14 },
-  stepNum: {
-    width: 28, height: 28, borderRadius: 14,
-    backgroundColor: '#0A8F3C', alignItems: 'center', justifyContent: 'center',
+  // ── Empty state ──────────────────────────────────────────────────────────
+  emptyWrap: {
+    alignItems: 'center', paddingVertical: 28,
+    marginHorizontal: 14, backgroundColor: '#fff',
+    borderRadius: 14, marginBottom: 8,
   },
-  stepNumText: { color: '#fff', fontWeight: '800', fontSize: 13 },
-  stepTitle:   { fontSize: 14, fontWeight: '700', color: '#111', marginBottom: 2 },
-  stepSub:     { fontSize: 12, color: '#888', lineHeight: 18 },
-
-  // FAB
-  fab: {
-    position: 'absolute', bottom: 24, right: 20,
-    width: 56, height: 56, borderRadius: 28,
-    backgroundColor: '#0A8F3C', alignItems: 'center', justifyContent: 'center',
-    elevation: 6, shadowColor: '#0A8F3C',
-    shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8,
+  emptyIconWrap: {
+    width: 52, height: 52, borderRadius: 26,
+    backgroundColor: '#EAF7EE',
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 10,
   },
+  emptyTitle: { fontSize: 13.5, fontWeight: '700', color: '#333', marginBottom: 4 },
+  emptySub:   { fontSize: 11.5, color: '#CCC', textAlign: 'center', paddingHorizontal: 24 },
 });

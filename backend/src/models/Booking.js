@@ -16,6 +16,7 @@ const bookingSchema = new mongoose.Schema(
       enum: ['pending', 'approved', 'rejected'],
       default: 'pending',
     },
+    rejectionNote: { type: String, default: '' },   // admin note when rejecting
   },
   { timestamps: true }
 );

@@ -12,6 +12,7 @@ export interface Booking {
   totalAmount: number;
   status: string;
   paymentScreenshot?: string;
+  rejectionNote?: string;
 }
 
 interface BookingState {

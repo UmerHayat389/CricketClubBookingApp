@@ -7,8 +7,11 @@ export const createBooking = async (formData: any) => {
   return res.data;
 };
 
-export const getBookings = async () => {
-  const res = await API.get('/bookings');
+// Pass a date string (YYYY-MM-DD) to filter by date on the server
+export const getBookings = async (date?: string) => {
+  const params: Record<string, string> = {};
+  if (date) params.date = date;
+  const res = await API.get('/bookings', { params });
   return res.data;
 };
 
@@ -22,7 +25,8 @@ export const approveBooking = async (id: string) => {
   return res.data;
 };
 
-export const rejectBooking = async (id: string) => {
-  const res = await API.put(`/bookings/reject/${id}`);
+// Accepts an optional rejectionNote string
+export const rejectBooking = async (id: string, rejectionNote?: string) => {
+  const res = await API.put(`/bookings/reject/${id}`, { rejectionNote: rejectionNote || '' });
   return res.data;
 };

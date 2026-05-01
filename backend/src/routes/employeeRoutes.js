@@ -4,9 +4,15 @@ const router = express.Router();
 const {
   createEmployee,
   getEmployees,
+  updateEmployee,
+  deleteEmployee,
 } = require('../controllers/employeeController');
 
-router.post('/', createEmployee);
-router.get('/', getEmployees);
+const upload = require('../middleware/uploadMiddleware');
+
+router.get('/',         getEmployees);
+router.post('/',        upload.single('photo'), createEmployee);
+router.put('/:id',      upload.single('photo'), updateEmployee);
+router.delete('/:id',   deleteEmployee);
 
 module.exports = router;
