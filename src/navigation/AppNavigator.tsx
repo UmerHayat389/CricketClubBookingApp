@@ -46,9 +46,9 @@ const AppNavigator = () => {
 
   const handleAdminLogout = () => {
     dispatch(adminLogout());
+    setShowAdminLogin(true); // go back to Admin Login screen
   };
 
-  // ── Single NavigationContainer always rendered ───────────────
   return (
     <NavigationContainer>
       {booting ? (
@@ -56,14 +56,10 @@ const AppNavigator = () => {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator size="large" color="#0A8F3C" />
         </View>
-      ) : !isUserLoggedIn ? (
-        // Not logged in — onLoginSuccess was empty () => {}, fixed below
-        <UserLoginScreen onLoginSuccess={() => {}} />
-      ) : isAdmin ? (
-        // Admin dashboard
-        <AdminTabs onLogout={handleAdminLogout} />
+
       ) : showAdminLogin ? (
-        // Admin login modal
+        // Admin Login screen — checked first so it works from both
+        // UserLoginScreen (not logged in) and UserTabs (logged in)
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="AdminLogin">
             {() => (
@@ -73,9 +69,22 @@ const AppNavigator = () => {
             )}
           </Stack.Screen>
         </Stack.Navigator>
+
+      ) : isAdmin ? (
+        // ✅ isAdmin checked BEFORE !isUserLoggedIn
+        // After admin login: isAdmin=true but isUserLoggedIn=false
+        // Without this order, !isUserLoggedIn catches first → shows UserLoginScreen (the bug)
+        <AdminTabs onLogout={handleAdminLogout} />
+
+      ) : !isUserLoggedIn ? (
+        // Not logged in as user — show user login
+        <UserLoginScreen
+          onLoginSuccess={() => {}}
+          onAdminLogin={() => setShowAdminLogin(true)}
+        />
+
       ) : (
-        // key=userId forces full remount of UserTabs when a different user logs in
-        // This guarantees all screens are fresh with no stale data from previous user
+        // Logged in as regular user
         <UserTabs
           key={userId}
           openAdminLogin={() => setShowAdminLogin(true)}

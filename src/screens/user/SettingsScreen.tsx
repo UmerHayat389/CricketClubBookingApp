@@ -224,25 +224,6 @@ const SettingsScreen = ({ openAdminLogin, onLogout }: Props) => {
             onPress={() => showToast('Share link copied!')} />
         </View>
 
-        {/* ── Administration ── */}
-        <SectionHeader title="Administration" />
-        <TouchableOpacity style={styles.adminBtn} onPress={openAdminLogin} activeOpacity={0.85}>
-          {/* subtle shimmer stripe */}
-          <View style={styles.adminBtnShimmer} />
-          <View style={styles.adminBtnLeft}>
-            <View style={styles.adminBtnIcon}>
-              <Icon name="shield-checkmark" size={22} color="#0A8F3C" />
-            </View>
-            <View>
-              <Text style={styles.adminBtnLabel}>Admin Panel</Text>
-              <Text style={styles.adminBtnSub}>Access club management</Text>
-            </View>
-          </View>
-          <View style={styles.adminBtnArrow}>
-            <Icon name="chevron-forward" size={16} color="#fff" />
-          </View>
-        </TouchableOpacity>
-
         {/* ── Account / Logout ── */}
         <SectionHeader title="Account" />
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.82}>
@@ -368,48 +349,6 @@ const styles = StyleSheet.create({
   rowValue:   { fontSize: 13, color: '#666', fontWeight: '600' },
 
   divider: { height: 1, backgroundColor: '#F5F5F5', marginLeft: 64 },
-
-  // ── Admin button — refined dark-on-white with green accent ──
-  adminBtn: {
-    backgroundColor: '#0A8F3C',
-    borderRadius: 16,
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-    elevation: 5,
-    shadowColor: '#0A8F3C',
-    shadowOpacity: 0.40,
-    shadowOffset: { width: 0, height: 5 },
-    shadowRadius: 12,
-    overflow: 'hidden',
-  },
-  // Subtle diagonal shimmer stripe overlay
-  adminBtnShimmer: {
-    position: 'absolute',
-    top: -20, right: 60,
-    width: 60, height: 120,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    transform: [{ rotate: '20deg' }],
-  },
-  adminBtnLeft:  { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  adminBtnIcon:  {
-    width: 46, height: 46, borderRadius: 13,
-    backgroundColor: '#fff',
-    alignItems: 'center', justifyContent: 'center',
-    elevation: 2,
-    shadowColor: '#000', shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: 2 }, shadowRadius: 4,
-  },
-  adminBtnLabel: { fontSize: 15, fontWeight: '800', color: '#fff', letterSpacing: 0.1 },
-  adminBtnSub:   { fontSize: 12, color: 'rgba(255,255,255,0.72)', marginTop: 2 },
-  adminBtnArrow: {
-    width: 32, height: 32, borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)',
-  },
 
   // ── Logout button — crisp white card with red accent ──
   logoutBtn: {

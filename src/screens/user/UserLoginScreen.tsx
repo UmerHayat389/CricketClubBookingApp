@@ -14,9 +14,10 @@ const GREEN = '#0A8F3C';
 
 interface Props {
   onLoginSuccess: () => void;
+  onAdminLogin?: () => void;   // ← new prop
 }
 
-const UserLoginScreen = ({ onLoginSuccess }: Props) => {
+const UserLoginScreen = ({ onLoginSuccess, onAdminLogin }: Props) => {
   const dispatch = useDispatch();
 
   const [mode, setMode]       = useState<'login' | 'register'>('login');
@@ -43,7 +44,7 @@ const UserLoginScreen = ({ onLoginSuccess }: Props) => {
     } catch (err: any) {
       const msg = err?.response?.data?.message ?? (isLogin
         ? 'Name not found. Please register first.'
-        : 'Could not register. Try a different name.');
+        : 'This Name already used by different User. Try Another username.');
       Alert.alert('Error', msg);
     } finally {
       setLoading(false);
@@ -154,6 +155,27 @@ const UserLoginScreen = ({ onLoginSuccess }: Props) => {
           </View>
 
         </View>
+        {/* ── End Card ── */}
+
+        {/* ── OR Divider + Admin Login ── */}
+        {onAdminLogin && (
+          <>
+            <View style={styles.orRow}>
+              <View style={styles.orLine} />
+              <Text style={styles.orText}>OR</Text>
+              <View style={styles.orLine} />
+            </View>
+
+            <TouchableOpacity
+              style={styles.adminBtn}
+              onPress={onAdminLogin}
+              activeOpacity={0.85}
+            >
+              <Icon name="shield-checkmark-outline" size={18} color={GREEN} />
+              <Text style={styles.adminBtnText}>Admin Login</Text>
+            </TouchableOpacity>
+          </>
+        )}
 
         {/* Bottom note */}
         <Text style={styles.bottomNote}>
@@ -257,6 +279,43 @@ const styles = StyleSheet.create({
   switchRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   switchText: { fontSize: 13, color: '#AAA' },
   switchLink: { fontSize: 13, fontWeight: '700', color: GREEN },
+
+  // OR divider
+  orRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  orLine: { flex: 1, height: 1, backgroundColor: '#E8E8E8' },
+  orText: {
+    marginHorizontal: 12,
+    fontSize: 12,
+    color: '#BBB',
+    fontWeight: '600',
+  },
+
+  // Admin Login button
+  adminBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: '#E0E0E0',
+    borderRadius: 14,
+    height: 50,
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 6,
+    elevation: 1,
+  },
+  adminBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#444',
+  },
 
   // Bottom note
   bottomNote: {

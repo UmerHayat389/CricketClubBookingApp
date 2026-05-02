@@ -11,6 +11,7 @@ import {
 import { useDispatch } from 'react-redux';
 import { loginAdmin } from '../../services/authService';
 import { loginSuccess } from '../../store/slices/authSlice';
+import Icon from 'react-native-vector-icons/Ionicons';
 
 const AdminLoginScreen = ({ onLogin }: { onLogin: () => void }) => {
   const dispatch = useDispatch();
@@ -18,6 +19,7 @@ const AdminLoginScreen = ({ onLogin }: { onLogin: () => void }) => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   const login = async () => {
     if (!email || !password) {
@@ -64,14 +66,27 @@ const AdminLoginScreen = ({ onLogin }: { onLogin: () => void }) => {
         autoCapitalize="none"
       />
 
-      <TextInput
-        placeholder="Password"
-        placeholderTextColor="#999"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-        style={styles.input}
-      />
+      <View style={styles.passwordWrap}>
+        <TextInput
+          placeholder="Password"
+          placeholderTextColor="#999"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry={!showPassword}
+          style={styles.passwordInput}
+        />
+        <TouchableOpacity
+          onPress={() => setShowPassword(prev => !prev)}
+          style={styles.eyeBtn}
+          activeOpacity={0.7}
+        >
+          <Icon
+            name={showPassword ? 'eye-outline' : 'eye-off-outline'}
+            size={20}
+            color="#999"
+          />
+        </TouchableOpacity>
+      </View>
 
       <TouchableOpacity
         style={[styles.button, loading && styles.buttonDisabled]}
@@ -128,6 +143,25 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     fontSize: 15,
     color: '#222',
+  },
+  passwordWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 10,
+    marginBottom: 14,
+  },
+  passwordInput: {
+    flex: 1,
+    padding: 14,
+    fontSize: 15,
+    color: '#222',
+  },
+  eyeBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 14,
   },
   button: {
     backgroundColor: '#0A8F3C',
