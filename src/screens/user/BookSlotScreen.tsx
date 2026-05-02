@@ -51,7 +51,7 @@ const getDays = () => {
       dayNum:    d.getDate(),
       month:     monthNames[d.getMonth()],
       year:      d.getFullYear(),
-      full:      d.toISOString().split('T')[0],
+      full:      `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`,
       monthName: fullMonths[d.getMonth()],
     });
   }
@@ -105,6 +105,7 @@ const BookSlotScreen = ({ navigation }: any) => {
   const dispatch    = useDispatch();
   const insets      = useSafeAreaInsets();
   const bookedSlots = useSelector((state: RootState) => state.booking.bookedSlots);
+  const userId      = useSelector((state: RootState) => (state as any).auth.userId);
 
   // days regenerated fresh so "today" is always correct
   const [days]               = useState(() => getDays());
@@ -229,6 +230,7 @@ const BookSlotScreen = ({ navigation }: any) => {
     try {
       const sortedSlots = [...selectedSlots].sort((a, b) => ALL_SLOTS.indexOf(a) - ALL_SLOTS.indexOf(b));
       const formData = new FormData();
+      formData.append('userId',            userId || '');
       formData.append('userName',          name);
       formData.append('phone',             phone);
       formData.append('slotTime',          sortedSlots.join(' - '));
@@ -280,11 +282,15 @@ const BookSlotScreen = ({ navigation }: any) => {
         </TouchableOpacity>
       </View>
 
-      {/* Scrollable content — paddingBottom clears the bottom bar */}
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
+      {/* Body: ScrollView fills remaining space, bottom bar sits below it in flow */}
+      <View style={styles.body}>
+        <ScrollView
+          style={{ flex: 1 }}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
 
         {/* Ground Card */}
         <View style={styles.groundCard}>
@@ -503,19 +509,20 @@ const BookSlotScreen = ({ navigation }: any) => {
           </View>
         </View>
 
-      </ScrollView>
+        </ScrollView>
 
-      {/* ── Bottom Bar ── */}
-      <View style={styles.bottomBar}>
-        <View>
-          <Text style={styles.bottomLabel}>Total Amount</Text>
-          <Text style={styles.bottomAmount}>PKR {totalAmount.toLocaleString()}</Text>
+        {/* ── Bottom Bar ── */}
+        <View style={styles.bottomBar}>
+          <View>
+            <Text style={styles.bottomLabel}>Total Amount</Text>
+            <Text style={styles.bottomAmount}>PKR {totalAmount.toLocaleString()}</Text>
+          </View>
+          <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirmBooking}>
+            <Icon name="calendar-outline" size={18} color="#fff" />
+            <Text style={styles.confirmBtnText}>Confirm Booking</Text>
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirmBooking}>
-          <Icon name="calendar-outline" size={18} color="#fff" />
-          <Text style={styles.confirmBtnText}>Confirm Booking</Text>
-        </TouchableOpacity>
-      </View>
+      </View>{/* end body */}
 
       {/* ── Payment Modal ── */}
       <Modal visible={paymentModal} transparent animationType="slide">
@@ -588,7 +595,18 @@ const SB_HEIGHT = StatusBar.currentHeight ?? 24;
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F6F7FB' },
 
-  // Header — correct top padding, no excess margin
+  // Body fills remaining height between header and screen bottom
+  body: {
+    flex: 1,
+    flexDirection: 'column',
+  },
+
+  // ScrollView — padding clears the bottom bar + tab bar
+  scrollContent: {
+    paddingBottom: Platform.OS === 'ios' ? 160 : 140,
+  },
+
+  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -613,36 +631,31 @@ const styles = StyleSheet.create({
   },
   myBookingsText: { fontSize: 12, color: '#0A8F3C', fontWeight: '600' },
 
-  // ScrollView — extra bottom padding so last section clears the bottom bar
-  scrollContent: {
-    paddingBottom: Platform.OS === 'ios' ? 180 : 150,
-  },
-
   // Ground Card
   groundCard: {
     flexDirection: 'row', backgroundColor: '#fff',
-    margin: 16, borderRadius: 16, padding: 14,
+    margin: 12, borderRadius: 14, padding: 12,
     elevation: 2, shadowColor: '#000', shadowOpacity: 0.06,
     shadowOffset: { width: 0, height: 2 }, shadowRadius: 6,
   },
-  groundImg:    { width: 100, height: 90, borderRadius: 12 },
-  groundInfo:   { flex: 1, marginLeft: 12 },
-  groundName:   { fontSize: 17, fontWeight: '800', color: '#111', marginBottom: 5 },
-  locationRow:  { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  locationText: { fontSize: 12, color: '#888', marginLeft: 3 },
-  tagsWrap:     { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  tag:          { backgroundColor: '#F0FFF6', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20, borderWidth: 1, borderColor: '#C8EDD8' },
-  tagText:      { fontSize: 11, color: '#0A8F3C' },
+  groundImg:    { width: 80, height: 76, borderRadius: 10 },
+  groundInfo:   { flex: 1, marginLeft: 10 },
+  groundName:   { fontSize: 15, fontWeight: '800', color: '#111', marginBottom: 4 },
+  locationRow:  { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+  locationText: { fontSize: 11, color: '#888', marginLeft: 3 },
+  tagsWrap:     { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
+  tag:          { backgroundColor: '#F0FFF6', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 20, borderWidth: 1, borderColor: '#C8EDD8' },
+  tagText:      { fontSize: 10, color: '#0A8F3C' },
 
   // Sections
   section: {
-    backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 12,
-    borderRadius: 16, padding: 16, elevation: 1,
+    backgroundColor: '#fff', marginHorizontal: 12, marginBottom: 10,
+    borderRadius: 14, padding: 13, elevation: 1,
     shadowColor: '#000', shadowOpacity: 0.04, shadowOffset: { width: 0, height: 1 }, shadowRadius: 4,
   },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  sectionTitle:  { fontSize: 15, fontWeight: '800', color: '#111', marginBottom: 14 },
-  sectionHint:   { fontSize: 12, color: '#888', marginTop: -10, marginBottom: 12 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 11 },
+  sectionTitle:  { fontSize: 13, fontWeight: '800', color: '#111', marginBottom: 11 },
+  sectionHint:   { fontSize: 11, color: '#888', marginTop: -8, marginBottom: 10 },
 
   // Month badge — no chevron
   monthBadge: {
@@ -651,72 +664,74 @@ const styles = StyleSheet.create({
   },
   monthText: { fontSize: 12, color: '#0A8F3C', fontWeight: '600' },
 
-  // Date cards
-  dayCard:       { alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, borderRadius: 14, borderWidth: 1.5, borderColor: '#EBEBEB', marginRight: 8, minWidth: 66 },
+  // Date cards — compact
+  dayCard:       { alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, borderWidth: 1.5, borderColor: '#EBEBEB', marginRight: 6, minWidth: 52 },
   dayCardActive: { backgroundColor: '#0A8F3C', borderColor: '#0A8F3C' },
-  dayName:       { fontSize: 11, color: '#999', marginBottom: 4 },
-  dayNum:        { fontSize: 22, fontWeight: '800', color: '#111' },
-  dayMonth:      { fontSize: 11, color: '#999', marginTop: 2 },
+  dayName:       { fontSize: 10, color: '#999', marginBottom: 2 },
+  dayNum:        { fontSize: 17, fontWeight: '800', color: '#111' },
+  dayMonth:      { fontSize: 10, color: '#999', marginTop: 1 },
   dayTextActive: { color: '#fff' },
 
   // Slot cards
-  slotCard:          { alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, borderRadius: 12, borderWidth: 1.5, borderColor: '#EBEBEB', marginRight: 8, minWidth: 94 },
+  slotCard:          { alignItems: 'center', paddingHorizontal: 11, paddingVertical: 9, borderRadius: 10, borderWidth: 1.5, borderColor: '#EBEBEB', marginRight: 7, minWidth: 84 },
   slotCardSelected:  { backgroundColor: '#0A8F3C', borderColor: '#0A8F3C' },
   slotCardBooked:    { backgroundColor: '#FAFAFA', borderColor: '#EEEEEE' },
-  slotTime:          { fontSize: 13, fontWeight: '700', color: '#111' },
+  slotTime:          { fontSize: 12, fontWeight: '700', color: '#111' },
   slotTimeSelected:  { color: '#fff' },
   slotTimeBooked:    { color: '#CCCCCC' },
-  slotPrice:         { fontSize: 11, color: '#0A8F3C', marginTop: 3, fontWeight: '600' },
+  slotPrice:         { fontSize: 10, color: '#0A8F3C', marginTop: 2, fontWeight: '600' },
   slotPriceSelected: { color: 'rgba(255,255,255,0.85)' },
   slotPriceBooked:   { color: '#CCCCCC' },
-  selectedSlotInfo:  { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F0FFF6', padding: 10, borderRadius: 10, marginTop: 12 },
-  selectedSlotText:  { fontSize: 13, color: '#0A8F3C', fontWeight: '600', flex: 1 },
+  selectedSlotInfo:  { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F0FFF6', padding: 8, borderRadius: 8, marginTop: 10 },
+  selectedSlotText:  { fontSize: 12, color: '#0A8F3C', fontWeight: '600', flex: 1 },
 
   // Duration cards
-  durationCard:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: '#EBEBEB', marginRight: 8 },
+  durationCard:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1.5, borderColor: '#EBEBEB', marginRight: 7 },
   durationCardActive: { borderColor: '#0A8F3C', backgroundColor: '#F0FFF6' },
-  durationText:       { fontSize: 13, color: '#666' },
+  durationText:       { fontSize: 12, color: '#666' },
   durationTextActive: { color: '#0A8F3C', fontWeight: '700' },
 
   // Fields
-  fieldRow:      { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
+  fieldRow:      { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: '#F5F5F5' },
   fieldRowError: { borderBottomColor: '#FFCCCC' },
-  fieldLabel:    { flex: 1, marginLeft: 12, fontSize: 14, color: '#444' },
-  fieldInput:    { flex: 1, marginLeft: 12, fontSize: 14, color: '#111', padding: 0 },
+  fieldLabel:    { flex: 1, marginLeft: 10, fontSize: 13, color: '#444' },
+  fieldInput:    { flex: 1, marginLeft: 10, fontSize: 13, color: '#111', padding: 0 },
 
   // Inline field error
-  fieldErrorRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4, marginBottom: 2, paddingLeft: 4 },
-  fieldErrorText:{ fontSize: 12, color: '#EF4444' },
+  fieldErrorRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3, marginBottom: 1, paddingLeft: 4 },
+  fieldErrorText:{ fontSize: 11, color: '#EF4444' },
 
   // Counter
   counter:              { flexDirection: 'row', alignItems: 'center' },
-  counterBtn:           { width: 30, height: 30, borderRadius: 15, borderWidth: 1.5, borderColor: '#DDDDDD', alignItems: 'center', justifyContent: 'center' },
+  counterBtn:           { width: 26, height: 26, borderRadius: 13, borderWidth: 1.5, borderColor: '#DDDDDD', alignItems: 'center', justifyContent: 'center' },
   counterBtnDisabled:   { borderColor: '#EEEEEE', backgroundColor: '#FAFAFA' },
-  counterBtnText:       { fontSize: 18, color: '#333', lineHeight: 20 },
+  counterBtnText:       { fontSize: 16, color: '#333', lineHeight: 18 },
   counterBtnTextDisabled:{ color: '#CCCCCC' },
-  counterVal:           { marginHorizontal: 14, fontSize: 16, fontWeight: '700', color: '#111' },
+  counterVal:           { marginHorizontal: 12, fontSize: 15, fontWeight: '700', color: '#111' },
 
   // Summary
-  summaryRow:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6 },
-  summaryLabel:{ fontSize: 13, color: '#888' },
-  summaryVal:  { fontSize: 13, color: '#444' },
-  divider:     { height: 1, backgroundColor: '#F0F0F0', marginVertical: 10 },
-  totalLabel:  { fontSize: 15, fontWeight: '700', color: '#111' },
-  totalVal:    { fontSize: 18, fontWeight: '900', color: '#0A8F3C' },
+  summaryRow:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 5 },
+  summaryLabel:{ fontSize: 12, color: '#888' },
+  summaryVal:  { fontSize: 12, color: '#444' },
+  divider:     { height: 1, backgroundColor: '#F0F0F0', marginVertical: 8 },
+  totalLabel:  { fontSize: 14, fontWeight: '700', color: '#111' },
+  totalVal:    { fontSize: 16, fontWeight: '900', color: '#0A8F3C' },
 
-  // Bottom bar — sits above tab bar naturally via elevation; paddingBottom adds safe gap
+  // Bottom bar — fixed above tab bar, keyboard overlays it (adjustNothing in manifest)
   bottomBar: {
-    position: 'absolute', bottom: Platform.OS === 'ios' ? 85 : 65, left: 0, right: 0,
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 82 : 62,
+    left: 0, right: 0,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     backgroundColor: '#fff',
-    paddingHorizontal: 20, paddingTop: 14,
-    paddingBottom: 12,
-    borderTopWidth: 1, borderTopColor: '#F0F0F0', elevation: 12,
+    paddingHorizontal: 18, paddingTop: 12, paddingBottom: 12,
+    borderTopWidth: 1, borderTopColor: '#F0F0F0',
+    elevation: 20, zIndex: 100,
   },
-  bottomLabel:   { fontSize: 12, color: '#999', marginBottom: 2 },
-  bottomAmount:  { fontSize: 22, fontWeight: '900', color: '#0A8F3C' },
-  confirmBtn:    { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#0A8F3C', paddingHorizontal: 22, paddingVertical: 15, borderRadius: 14 },
-  confirmBtnText:{ color: '#fff', fontWeight: '800', fontSize: 15 },
+  bottomLabel:   { fontSize: 11, color: '#999', marginBottom: 2 },
+  bottomAmount:  { fontSize: 20, fontWeight: '900', color: '#0A8F3C' },
+  confirmBtn:    { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: '#0A8F3C', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 12 },
+  confirmBtnText:{ color: '#fff', fontWeight: '800', fontSize: 14 },
 
   // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },

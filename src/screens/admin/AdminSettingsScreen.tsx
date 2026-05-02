@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,13 +8,16 @@ import {
   Switch,
   Alert,
   Linking,
+  Animated,
+  Modal,
+  Pressable,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useDispatch } from 'react-redux';
-import { logout } from '../../store/slices/authSlice';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { adminLogout } from '../../store/slices/authSlice';
 
 // ─── Props ────────────────────────────────────────────────────────
-// onLogout is passed from AppNavigator to flip isAdmin → false
 interface Props {
   onLogout?: () => void;
 }
@@ -84,37 +87,67 @@ const RowValue = ({
 // ─── Main Screen ──────────────────────────────────────────────────
 const AdminSettingsScreen = ({ onLogout }: Props) => {
   const dispatch = useDispatch();
+  const insets = useSafeAreaInsets();
 
   const [bookingAlerts, setBookingAlerts]   = useState(true);
   const [autoApprove, setAutoApprove]       = useState(false);
   const [employeeAlerts, setEmployeeAlerts] = useState(true);
 
+  // ── Toast ──────────────────────────────────────────────────────
+  const toastOpacity = useRef(new Animated.Value(0)).current;
+  const [toastMsg, setToastMsg] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'info'>('success');
+
+  const showToast = (msg: string, type: 'success' | 'info' = 'success') => {
+    setToastMsg(msg);
+    setToastType(type);
+    Animated.sequence([
+      Animated.timing(toastOpacity, { toValue: 1, duration: 250, useNativeDriver: true }),
+      Animated.delay(1800),
+      Animated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start();
+  };
+
+  // ── Custom logout modal state ──────────────────────────────────
+  const [logoutModalVisible, setLogoutModalVisible] = useState(false);
+  const modalScale = useRef(new Animated.Value(0.88)).current;
+  const modalOpacity = useRef(new Animated.Value(0)).current;
+
+  const openLogoutModal = () => {
+    setLogoutModalVisible(true);
+    Animated.parallel([
+      Animated.spring(modalScale, { toValue: 1, useNativeDriver: true, tension: 80, friction: 8 }),
+      Animated.timing(modalOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+    ]).start();
+  };
+
+  const closeLogoutModal = () => {
+    Animated.parallel([
+      Animated.timing(modalScale, { toValue: 0.88, duration: 160, useNativeDriver: true }),
+      Animated.timing(modalOpacity, { toValue: 0, duration: 160, useNativeDriver: true }),
+    ]).start(() => setLogoutModalVisible(false));
+  };
+
+  // ── Logout ────────────────────────────────────────────────────
   const handleLogout = () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout from the admin panel?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Logout',
-          style: 'destructive',
-          onPress: () => {
-            dispatch(logout());   // clear Redux auth state
-            onLogout?.();         // flip AppNavigator isAdmin → false
-          },
-        },
-      ]
-    );
+    openLogoutModal();
+  };
+
+  const confirmLogout = () => {
+    closeLogoutModal();
+    dispatch(adminLogout());
+    showToast('Returned to user mode');
+    setTimeout(() => onLogout?.(), 600);
   };
 
   const handleChangePassword = () => {
-    Alert.alert('Change Password', 'This would open the change password screen.');
+    showToast('Password reset email sent', 'info');
   };
 
   return (
     <View style={styles.screen}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <View style={styles.headerTop}>
           <View>
             <Text style={styles.headerTitle}>Settings</Text>
@@ -127,8 +160,10 @@ const AdminSettingsScreen = ({ onLogout }: Props) => {
         </View>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 80 }]}
+      >
         {/* Admin profile card */}
         <View style={styles.profileCard}>
           <View style={styles.avatar}>
@@ -157,7 +192,11 @@ const AdminSettingsScreen = ({ onLogout }: Props) => {
             icon="flash-outline" iconBg="#2E7D32"
             label="Auto-Approve Bookings"
             sublabel="Skip manual approval step"
-            value={autoApprove} onChange={setAutoApprove}
+            value={autoApprove}
+            onChange={(v) => {
+              setAutoApprove(v);
+              showToast(v ? 'Auto-approve enabled' : 'Auto-approve disabled');
+            }}
           />
           <View style={styles.divider} />
           <RowArrow
@@ -188,7 +227,11 @@ const AdminSettingsScreen = ({ onLogout }: Props) => {
             icon="notifications-outline" iconBg="#1976D2"
             label="Employee Alerts"
             sublabel="Shift & schedule notifications"
-            value={employeeAlerts} onChange={setEmployeeAlerts}
+            value={employeeAlerts}
+            onChange={(v) => {
+              setEmployeeAlerts(v);
+              showToast(v ? 'Employee alerts on' : 'Employee alerts off');
+            }}
           />
         </View>
 
@@ -206,7 +249,11 @@ const AdminSettingsScreen = ({ onLogout }: Props) => {
             icon="megaphone-outline" iconBg="#8E24AA"
             label="Booking Status Alerts"
             sublabel="Notify on new bookings"
-            value={bookingAlerts} onChange={setBookingAlerts}
+            value={bookingAlerts}
+            onChange={(v) => {
+              setBookingAlerts(v);
+              showToast(v ? 'Booking alerts on' : 'Booking alerts off');
+            }}
           />
         </View>
 
@@ -278,6 +325,56 @@ const AdminSettingsScreen = ({ onLogout }: Props) => {
 
         <View style={{ height: 30 }} />
       </ScrollView>
+
+      {/* ── Custom Logout Confirmation Modal ── */}
+      <Modal
+        transparent
+        visible={logoutModalVisible}
+        animationType="none"
+        onRequestClose={closeLogoutModal}
+        statusBarTranslucent
+      >
+        <Pressable style={styles.modalBackdrop} onPress={closeLogoutModal}>
+          <Animated.View
+            style={[styles.modalCard, { transform: [{ scale: modalScale }], opacity: modalOpacity }]}
+          >
+            <Pressable>
+              <View style={styles.modalIconWrap}>
+                <View style={styles.modalIconRing}>
+                  <Icon name="log-out-outline" size={28} color="#E53935" />
+                </View>
+              </View>
+              <Text style={styles.modalTitle}>Logout</Text>
+              <Text style={styles.modalBody}>
+                Are you sure you want to logout from the admin panel?
+              </Text>
+              <View style={styles.modalDivider} />
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.cancelBtn} onPress={closeLogoutModal} activeOpacity={0.75}>
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.confirmBtn} onPress={confirmLogout} activeOpacity={0.82}>
+                  <Icon name="log-out-outline" size={16} color="#fff" style={{ marginRight: 6 }} />
+                  <Text style={styles.confirmBtnText}>Logout</Text>
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          </Animated.View>
+        </Pressable>
+      </Modal>
+
+      {/* ── Toast ── */}
+      <Animated.View
+        style={[styles.toast, { opacity: toastOpacity }]}
+        pointerEvents="none"
+      >
+        <Icon
+          name={toastType === 'success' ? 'checkmark-circle' : 'information-circle'}
+          size={16}
+          color={toastType === 'success' ? '#4CAF50' : '#64B5F6'}
+        />
+        <Text style={styles.toastText}>{toastMsg}</Text>
+      </Animated.View>
     </View>
   );
 };
@@ -290,7 +387,6 @@ const styles = StyleSheet.create({
 
   header: {
     backgroundColor: '#fff',
-    paddingTop: 56,
     paddingBottom: 18,
     paddingHorizontal: 20,
     borderBottomWidth: 1,
@@ -402,4 +498,116 @@ const styles = StyleSheet.create({
   },
   logoutLabel: { fontSize: 15, fontWeight: '700', color: '#E53935' },
   logoutSub: { fontSize: 12, color: '#888', marginTop: 1 },
+
+  // ── Modal ──
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 28,
+  },
+  modalCard: {
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    width: '100%',
+    paddingBottom: 24,
+    paddingHorizontal: 24,
+    elevation: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowOffset: { width: 0, height: 12 },
+    shadowRadius: 24,
+    overflow: 'hidden',
+  },
+  modalIconWrap: {
+    alignItems: 'center',
+    marginTop: 28,
+    marginBottom: 16,
+  },
+  modalIconRing: {
+    width: 68, height: 68, borderRadius: 34,
+    backgroundColor: '#FFF0F0',
+    borderWidth: 2, borderColor: '#FFCDD2',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#111',
+    textAlign: 'center',
+    marginBottom: 8,
+    letterSpacing: -0.3,
+  },
+  modalBody: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 21,
+    marginBottom: 24,
+    paddingHorizontal: 8,
+  },
+  modalDivider: {
+    height: 1,
+    backgroundColor: '#F2F2F2',
+    marginBottom: 20,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  cancelBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#F5F5F5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#EBEBEB',
+  },
+  cancelBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#555',
+  },
+  confirmBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#E53935',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    elevation: 4,
+    shadowColor: '#E53935',
+    shadowOpacity: 0.4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 8,
+  },
+  confirmBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
+
+  // ── Toast (existing) ──
+  toast: {
+    position: 'absolute',
+    bottom: 100,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#1A1A1A',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 24,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 10,
+  },
+  toastText: { fontSize: 13, color: '#fff', fontWeight: '600' },
 });

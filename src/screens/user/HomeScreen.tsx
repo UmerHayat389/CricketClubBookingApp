@@ -27,12 +27,12 @@ const GROUND_IMAGES = [
   },
   {
     uri:      'https://images.unsplash.com/photo-1624526267942-ab0ff8a3e972?w=800',
-    name:     'Main Cricket Ground',
+    name:     'Green Field Arena',
     location: 'Lahore, Punjab',
   },
   {
     uri:      'https://images.unsplash.com/photo-1531415074968-036ba1b575da?w=800',
-    name:     'Practice Nets Arena',
+    name:     'Green Field Arena',
     location: 'Lahore, Punjab',
   },
 ];
@@ -50,7 +50,7 @@ const STATUS_BG:    Record<string, string> = { pending: '#FFF8EC', approved: '#E
 
 const parseDate = (dateStr: string) => {
   if (!dateStr) return { day: '', date: '', month: '' };
-  const d = new Date(dateStr);
+  const d = new Date(dateStr + 'T00:00:00');
   if (isNaN(d.getTime())) {
     const parts = dateStr.split(' ');
     return { date: parts[0] ?? '', month: (parts[1] ?? '').toUpperCase(), day: '' };
@@ -72,9 +72,13 @@ const BookingCard = ({ item, onPress }: { item: Booking; onPress: () => void }) 
     ? `${slotParts[0]} – ${slotParts[slotParts.length - 1]}`
     : item.slotTime;
 
-  const matchLabel = item.duration <= 1 ? 'Morning Match'
-    : item.duration <= 2 ? 'Evening Match'
-    : 'Full Day Match';
+  const startHour = slotParts[0]
+    ? parseInt(slotParts[0].replace(/[^0-9]/g, ''), 10) +
+      (slotParts[0].toLowerCase().includes('pm') && !slotParts[0].startsWith('12') ? 12 : 0)
+    : 0;
+  const matchLabel = startHour < 12 ? 'Morning Match'
+    : startHour < 17 ? 'Afternoon Match'
+    : 'Evening Match';
 
   return (
     <TouchableOpacity style={s.bookCard} activeOpacity={0.8} onPress={onPress}>
@@ -125,6 +129,7 @@ const HomeScreen = ({ navigation }: any) => {
   const bookings       = useSelector((state: RootState) => state.booking.bookings);
   const loading        = useSelector((state: RootState) => (state as any).booking.homeLoading ?? false);
   const userName       = useSelector((state: RootState) => (state as any).auth.userName);
+  const userId         = useSelector((state: RootState) => (state as any).auth.userId);
   const insets         = useSafeAreaInsets();
 
   // Slider
@@ -147,11 +152,12 @@ const HomeScreen = ({ navigation }: any) => {
   }, []);
 
   const loadBookings = useCallback(async () => {
+    if (!userId) return; // no user logged in yet, don't fetch
     try {
-      const data = await getBookings();
+      const data = await getBookings(userId);
       dispatch(setBookings(data));
     } catch (e) {}
-  }, [dispatch]);
+  }, [dispatch, userId]);
 
   useEffect(() => {
     loadBookings();
@@ -160,7 +166,7 @@ const HomeScreen = ({ navigation }: any) => {
     socket.on('bookingCreated', onNew);
     socket.on('bookingUpdated', onUpdate);
     return () => { socket.off('bookingCreated', onNew); socket.off('bookingUpdated', onUpdate); };
-  }, []);
+  }, [loadBookings]); // re-runs whenever userId changes (new user login)
 
   return (
     <View style={s.root}>
@@ -177,7 +183,7 @@ const HomeScreen = ({ navigation }: any) => {
         <View style={[s.header, { paddingTop: insets.top + 6 }]}>
           <View>
             <Text style={s.greeting}>Welcome back{userName ? `, ${userName}` : ''}!</Text>
-            <Text style={s.headerTitle}>Cricket Club</Text>
+            <Text style={s.headerTitle}>Green Feild Arena</Text>
           </View>
           <TouchableOpacity style={s.notifBtn} activeOpacity={0.7}>
             <Icon name="notifications-outline" size={20} color="#333" />
@@ -229,7 +235,7 @@ const HomeScreen = ({ navigation }: any) => {
             <React.Fragment key={stat.label}>
               <View style={s.statItem}>
                 <Icon
-                  name={stat.star ? 'star' : stat.icon}
+                  name={stat.star ? 'star-outline' : stat.icon}
                   size={18}
                   color={GREEN}
                 />
@@ -237,7 +243,7 @@ const HomeScreen = ({ navigation }: any) => {
                 <View style={s.statValueRow}>
                   <Text style={s.statValue}>{stat.value}</Text>
                   {stat.star && (
-                    <Icon name="star" size={9} color={GREEN} style={{ marginLeft: 2, marginTop: 2 }} />
+                    <Icon name="star-outline" size={9} color={GREEN} style={{ marginLeft: 2, marginTop: 2 }} />
                   )}
                 </View>
               </View>
@@ -316,17 +322,18 @@ const s = StyleSheet.create({
     backgroundColor: BG,
   },
   greeting: {
-    fontSize: 12,
+    fontSize: 11,
     color: GREEN,
     fontWeight: '500',
-    letterSpacing: 0.1,
+    letterSpacing: 0.3,
     marginBottom: 2,
+    textTransform: 'uppercase',
   },
   headerTitle: {
-    fontSize: 21,
-    fontWeight: '800',
+    fontSize: 20,
+    fontWeight: '500',
     color: '#1A1A1A',
-    letterSpacing: -0.4,
+    letterSpacing: 0.5,
   },
   notifBtn: {
     width: 36, height: 36, borderRadius: 18,
@@ -351,7 +358,7 @@ const s = StyleSheet.create({
     overflow: 'hidden',  // clips the slider images to rounded corners
   },
   heroImg:     { width: '100%', height: '100%', resizeMode: 'cover' },
-  heroOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.38)' },
+  heroOverlay: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.38)' },
   heroDots: {
     position: 'absolute',
     bottom: 10,

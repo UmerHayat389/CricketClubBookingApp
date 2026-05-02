@@ -18,8 +18,8 @@ const GREEN_LIGHT = '#E8F5EE';
 const DARK        = '#111111';
 const CRICKET_BG  = '#1a5c35';
 
-// Format "2026-05-25" → "May 25, 2026"
-const formatDate = (d?: string) => {
+// ── Helpers ────────────────────────────────────────────────────────────────
+const formatDate = (d?: string): string => {
   if (!d) return '';
   try {
     const dt = new Date(d);
@@ -28,32 +28,36 @@ const formatDate = (d?: string) => {
   } catch { return d; }
 };
 
-// ── Cricket placeholder (shown when no banner image uploaded) ──────────────
-const CricketPlaceholder = ({ style }: { style: any }) => (
-  <View style={[style, { backgroundColor: CRICKET_BG, alignItems: 'center', justifyContent: 'center' }]}>
-    <Icon name="baseball-outline" size={style?.height ? style.height / 3 : 38} color="rgba(255,255,255,0.25)" />
+const isEventPast = (date?: string): boolean => {
+  if (!date) return false;
+  try { return new Date(date) < new Date(); } catch { return false; }
+};
+
+// ── Cricket placeholder ────────────────────────────────────────────────────
+const CricketPlaceholder = ({ width, height }: { width: number; height: number }) => (
+  <View style={{ width, height, backgroundColor: CRICKET_BG, alignItems: 'center', justifyContent: 'center' }}>
+    <Icon name="baseball-outline" size={Math.round(height / 3)} color="rgba(255,255,255,0.2)" />
   </View>
 );
 
 // ── Status badge ───────────────────────────────────────────────────────────
-const StatusBadge = ({ date }: { date?: string }) => {
-  const isPast = date ? new Date(date) < new Date() : false;
-  const label  = isPast ? 'Past' : 'Upcoming';
-  const color  = isPast ? '#888' : GREEN;
-  const bg     = isPast ? '#F0F0F0' : GREEN_LIGHT;
+const StatusBadge = ({ date, style }: { date?: string; style?: any }) => {
+  const isPast = isEventPast(date);
   return (
-    <View style={[styles.statusBadge, { backgroundColor: bg }]}>
-      <View style={[styles.statusDot, { backgroundColor: color }]} />
-      <Text style={[styles.statusBadgeText, { color }]}>{label}</Text>
+    <View style={[styles.statusBadge, isPast ? styles.statusBadgePast : styles.statusBadgeLive, style]}>
+      <View style={[styles.statusDot, { backgroundColor: isPast ? '#999' : '#5CFF8A' }]} />
+      <Text style={[styles.statusBadgeText, { color: isPast ? '#666' : '#fff' }]}>
+        {isPast ? 'Past Event' : 'Upcoming'}
+      </Text>
     </View>
   );
 };
 
 // ══════════════════════════════════════════════════════════════════════════
 const EventsScreen = () => {
-  const dispatch = useDispatch<any>();
-  const insets   = useSafeAreaInsets();
-  const events   = useSelector((state: RootState) => state.event.events);
+  const dispatch    = useDispatch<any>();
+  const insets      = useSafeAreaInsets();
+  const events      = useSelector((state: RootState) => state.event.events);
   const [selected,   setSelected]   = useState<Event | null>(null);
   const [search,     setSearch]     = useState('');
   const [bookmarked, setBookmarked] = useState<Set<string>>(new Set());
@@ -61,11 +65,9 @@ const EventsScreen = () => {
   // ── Real-time ────────────────────────────────────────────────
   useEffect(() => {
     (async () => { try { dispatch(setEvents(await getEvents())); } catch {} })();
-
-    const onCreate = (e: Event)              => dispatch(addEvent(e));
-    const onUpdate = (e: Event)              => { dispatch(updateEvent(e)); setSelected(s => s?._id === e._id ? e : s); };
-    const onDelete = (id: string)            => { dispatch(deleteEvent(id)); setSelected(s => s?._id === id ? null : s); };
-
+    const onCreate = (e: Event)       => dispatch(addEvent(e));
+    const onUpdate = (e: Event)       => { dispatch(updateEvent(e)); setSelected(s => s?._id === e._id ? e : s); };
+    const onDelete = ({ _id }: { _id: string }) => { dispatch(deleteEvent(_id)); setSelected(s => s?._id === _id ? null : s); };
     socket.on('eventCreated', onCreate);
     socket.on('eventUpdated', onUpdate);
     socket.on('eventDeleted', onDelete);
@@ -76,7 +78,7 @@ const EventsScreen = () => {
     };
   }, []);
 
-  // ── Filter by search only ────────────────────────────────────
+  // ── Filter ───────────────────────────────────────────────────
   const filtered = useMemo(() => {
     if (!search.trim()) return events;
     const q = search.toLowerCase();
@@ -91,36 +93,31 @@ const EventsScreen = () => {
 
   const handleShare = async (e: Event) => {
     try {
-      await Share.share({
-        title:   e.title,
-        message: `${e.title}\n${e.description ?? ''}\nDate: ${formatDate(e.date)}`,
-      });
+      await Share.share({ title: e.title, message: `${e.title}\n${e.description ?? ''}\nDate: ${formatDate(e.date)}` });
     } catch {}
   };
 
-  // ── Card ─────────────────────────────────────────────────────
+  // ── Event card ────────────────────────────────────────────────
   const renderCard = ({ item }: { item: Event }) => {
     const isBookmarked = bookmarked.has(item._id);
     return (
       <TouchableOpacity style={styles.card} activeOpacity={0.9} onPress={() => setSelected(item)}>
 
-        {/* Left image */}
-        <View style={styles.cardImageWrap}>
+        {/* Left: image / placeholder */}
+        <View style={styles.cardLeft}>
           {item.banner ? (
-            <Image
-              source={{ uri: `${MEDIA_URL}/uploads/events/${item.banner}` }}
-              style={styles.cardImage}
-              resizeMode="cover"
-            />
+            <Image source={{ uri: `${MEDIA_URL}/uploads/events/${item.banner}` }} style={styles.cardImage} resizeMode="cover" />
           ) : (
-            <CricketPlaceholder style={styles.cardImage} />
+            <CricketPlaceholder width={110} height={130} />
           )}
-          <StatusBadge date={item.date} />
+          <View style={styles.cardBadge}>
+            <StatusBadge date={item.date} />
+          </View>
         </View>
 
-        {/* Right body */}
+        {/* Right: info */}
         <View style={styles.cardBody}>
-          <TouchableOpacity style={styles.bookmarkBtn} onPress={() => toggleBookmark(item._id)}>
+          <TouchableOpacity style={styles.bookmarkBtn} onPress={() => toggleBookmark(item._id)} hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}>
             <Icon name={isBookmarked ? 'bookmark' : 'bookmark-outline'} size={18} color={isBookmarked ? GREEN : '#CCC'} />
           </TouchableOpacity>
 
@@ -136,7 +133,7 @@ const EventsScreen = () => {
           {!!item.location && (
             <View style={styles.cardMeta}>
               <Icon name="location-outline" size={12} color="#888" />
-              <Text style={styles.cardMetaText}>{item.location}</Text>
+              <Text style={styles.cardMetaText} numberOfLines={1}>{item.location}</Text>
             </View>
           )}
 
@@ -145,8 +142,8 @@ const EventsScreen = () => {
             <Text style={styles.cardMetaText}>Cricket</Text>
           </View>
 
-          <TouchableOpacity style={styles.viewDetailsBtn} onPress={() => setSelected(item)}>
-            <Text style={styles.viewDetailsBtnText}>View Details</Text>
+          <TouchableOpacity style={styles.viewBtn} onPress={() => setSelected(item)}>
+            <Text style={styles.viewBtnText}>View Details</Text>
             <Icon name="chevron-forward" size={12} color={GREEN} />
           </TouchableOpacity>
         </View>
@@ -157,117 +154,170 @@ const EventsScreen = () => {
   // ── Detail Modal ──────────────────────────────────────────────
   const DetailModal = () => {
     if (!selected) return null;
+    const isPast      = isEventPast(selected.date);
     const isBookmarked = bookmarked.has(selected._id);
+
+    // Stats items
+    const stats = [
+      {
+        icon: 'calendar-outline',
+        iconBg: '#FEF3C7', iconColor: '#F59E0B',
+        val: formatDate(selected.date) || '—',
+        lbl: 'Date',
+      },
+      {
+        icon: 'baseball-outline',
+        iconBg: '#E8F5EE', iconColor: GREEN,
+        val: 'Cricket',
+        lbl: 'Sport',
+      },
+      {
+        icon: 'wallet-outline',
+        iconBg: selected.entryFee > 0 ? '#FFF4E5' : GREEN_LIGHT,
+        iconColor: selected.entryFee > 0 ? '#C47A00' : GREEN,
+        val: selected.entryFee > 0 ? `Rs.${selected.entryFee}` : 'Free',
+        lbl: 'Entry',
+      },
+      {
+        icon: 'people-outline',
+        iconBg: '#E0F2FE', iconColor: '#0284C7',
+        val: '22',
+        lbl: 'Players',
+      },
+    ];
 
     return (
       <Modal visible animationType="slide" transparent={false} onRequestClose={() => setSelected(null)}>
         <View style={styles.detailRoot}>
           <StatusBar barStyle="light-content" />
 
-          {/* Banner */}
-          <View style={styles.detailBanner}>
+          {/* ── HERO IMAGE (fixed height, not overlapping scroll) ── */}
+          <View style={styles.hero}>
             {selected.banner ? (
               <Image
                 source={{ uri: `${MEDIA_URL}/uploads/events/${selected.banner}` }}
-                style={styles.detailBannerFill}
+                style={StyleSheet.absoluteFill}
                 resizeMode="cover"
               />
             ) : (
-              <CricketPlaceholder style={styles.detailBannerFill} />
+              <View style={[StyleSheet.absoluteFill, { backgroundColor: CRICKET_BG }]}>
+                <Icon name="trophy-outline" size={120} color="rgba(255,255,255,0.07)"
+                  style={{ position: 'absolute', bottom: -10, right: -10 }} />
+              </View>
             )}
 
-            {/* Dark overlay */}
-            <View style={styles.detailBannerOverlay} />
+            {/* Gradient scrims */}
+            <View style={styles.heroScrimTop} />
+            <View style={styles.heroScrimBottom} />
 
-            {/* Top bar */}
-            <View style={[styles.detailTopBar, { paddingTop: insets.top + 10 }]}>
-              <TouchableOpacity style={styles.detailBackBtn} onPress={() => setSelected(null)}>
+            {/* Nav bar */}
+            <View style={[styles.heroNav, { paddingTop: insets.top + 10 }]}>
+              <TouchableOpacity style={styles.heroBtn} onPress={() => setSelected(null)}>
                 <Icon name="arrow-back" size={20} color="#fff" />
               </TouchableOpacity>
-              <View style={styles.detailTopRight}>
-                <TouchableOpacity style={styles.detailIconBtn} onPress={() => toggleBookmark(selected._id)}>
-                  <Icon name={isBookmarked ? 'bookmark' : 'bookmark-outline'} size={18} color="#fff" />
+              <Text style={styles.heroNavTitle}>Event Details</Text>
+              <View style={styles.heroNavRight}>
+                <TouchableOpacity style={styles.heroBtn} onPress={() => toggleBookmark(selected._id)}>
+                  <Icon name={isBookmarked ? 'bookmark' : 'bookmark-outline'} size={18} color={isBookmarked ? '#FFD700' : '#fff'} />
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.detailIconBtn} onPress={() => handleShare(selected)}>
+                <TouchableOpacity style={styles.heroBtn} onPress={() => handleShare(selected)}>
                   <Icon name="share-outline" size={18} color="#fff" />
                 </TouchableOpacity>
               </View>
             </View>
 
-            {/* Status */}
-            <View style={styles.detailStatusRow}>
+            {/* Chips row */}
+            <View style={styles.heroChips}>
               <StatusBadge date={selected.date} />
+              <View style={styles.heroChipSport}>
+                <Icon name="baseball-outline" size={11} color="#fff" />
+                <Text style={styles.heroChipText}>Cricket</Text>
+              </View>
             </View>
 
-            {/* Title on banner */}
-            <View style={styles.detailBannerText}>
-              <Text style={styles.detailBannerTitle}>{selected.title}</Text>
-              {!!selected.location && (
-                <View style={styles.detailLocationRow}>
-                  <Icon name="location-outline" size={13} color="rgba(255,255,255,0.8)" />
-                  <Text style={styles.detailLocationText}>{selected.location}</Text>
-                </View>
-              )}
+            {/* Title + meta */}
+            <View style={styles.heroBottom}>
+              <Text style={styles.heroTitle} numberOfLines={2}>{selected.title}</Text>
+              <View style={styles.heroMeta}>
+                {!!selected.date && (
+                  <View style={styles.heroMetaItem}>
+                    <Icon name="calendar-outline" size={13} color="rgba(255,255,255,0.8)" />
+                    <Text style={styles.heroMetaText}>{formatDate(selected.date)}</Text>
+                  </View>
+                )}
+                {!!selected.location && (
+                  <View style={styles.heroMetaItem}>
+                    <Icon name="location-outline" size={13} color="rgba(255,255,255,0.8)" />
+                    <Text style={styles.heroMetaText} numberOfLines={1}>{selected.location}</Text>
+                  </View>
+                )}
+              </View>
             </View>
           </View>
 
-          {/* Scrollable content */}
-          <ScrollView style={styles.detailScroll} showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}>
-
-            {/* Stats row */}
+          {/* ── SCROLLABLE BODY (starts BELOW hero, no overlap) ── */}
+          <ScrollView
+            style={styles.detailScroll}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingBottom: 24 }}
+          >
+            {/* Stats card */}
             <View style={styles.statsCard}>
-              <View style={styles.statItem}>
-                <Icon name="calendar-outline" size={20} color={GREEN} />
-                <Text style={styles.statValue}>{formatDate(selected.date) || '—'}</Text>
-                <Text style={styles.statLabel}>Date</Text>
-              </View>
-              <View style={styles.statDivider} />
-              <View style={styles.statItem}>
-                <Icon name="baseball-outline" size={20} color={GREEN} />
-                <Text style={styles.statValue}>Cricket</Text>
-                <Text style={styles.statLabel}>Sport</Text>
-              </View>
-              <View style={styles.statDivider} />
-              <View style={styles.statItem}>
-                <Icon name="cash-outline" size={20} color={GREEN} />
-                <Text style={styles.statValue}>
-                  {selected.entryFee > 0 ? `Rs. ${selected.entryFee}` : 'Free'}
-                </Text>
-                <Text style={styles.statLabel}>Entry</Text>
-              </View>
+              {stats.map((item, i) => (
+                <React.Fragment key={item.lbl}>
+                  <View style={styles.statItem}>
+                    <View style={[styles.statIconWrap, { backgroundColor: item.iconBg }]}>
+                      <Icon name={item.icon} size={17} color={item.iconColor} />
+                    </View>
+                    <Text style={styles.statVal} numberOfLines={1}>{item.val}</Text>
+                    <Text style={styles.statLbl}>{item.lbl}</Text>
+                  </View>
+                  {i < stats.length - 1 && <View style={styles.statDivider} />}
+                </React.Fragment>
+              ))}
             </View>
 
-            {/* About */}
+            {/* About Event */}
             {!!selected.description && (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>About Event</Text>
+                <View style={styles.sectionHeader}>
+                  <View style={styles.sectionAccent} />
+                  <Text style={styles.sectionTitle}>About Event</Text>
+                </View>
                 <Text style={styles.sectionText}>{selected.description}</Text>
               </View>
             )}
 
             {/* Event Details */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Event Details</Text>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionAccent} />
+                <Text style={styles.sectionTitle}>Event Details</Text>
+              </View>
 
               {!!selected.date && (
-                <View style={styles.detailRow}>
+                <View style={[styles.detailRow, styles.detailRowBorder]}>
                   <View style={[styles.detailRowIcon, { backgroundColor: '#FEF3C7' }]}>
                     <Icon name="calendar-outline" size={16} color="#F59E0B" />
                   </View>
-                  <View style={styles.detailRowText}>
+                  <View style={{ flex: 1 }}>
                     <Text style={styles.detailRowLabel}>Date</Text>
                     <Text style={styles.detailRowValue}>{formatDate(selected.date)}</Text>
+                  </View>
+                  <View style={[styles.statusPill, isPast ? styles.statusPillPast : styles.statusPillLive]}>
+                    <Text style={[styles.statusPillText, { color: isPast ? '#666' : GREEN }]}>
+                      {isPast ? 'Past' : 'Upcoming'}
+                    </Text>
                   </View>
                 </View>
               )}
 
               {!!selected.location && (
-                <View style={styles.detailRow}>
+                <View style={[styles.detailRow, styles.detailRowBorder]}>
                   <View style={[styles.detailRowIcon, { backgroundColor: GREEN_LIGHT }]}>
                     <Icon name="location-outline" size={16} color={GREEN} />
                   </View>
-                  <View style={styles.detailRowText}>
+                  <View style={{ flex: 1 }}>
                     <Text style={styles.detailRowLabel}>Venue</Text>
                     <Text style={styles.detailRowValue}>{selected.location}</Text>
                   </View>
@@ -275,24 +325,32 @@ const EventsScreen = () => {
               )}
 
               <View style={styles.detailRow}>
-                <View style={[styles.detailRowIcon, { backgroundColor: '#EDE9FE' }]}>
-                  <Icon name="cash-outline" size={16} color="#7C3AED" />
+                <View style={[styles.detailRowIcon, { backgroundColor: selected.entryFee > 0 ? '#FFF4E5' : GREEN_LIGHT }]}>
+                  <Icon name="wallet-outline" size={16} color={selected.entryFee > 0 ? '#C47A00' : GREEN} />
                 </View>
-                <View style={styles.detailRowText}>
+                <View style={{ flex: 1 }}>
                   <Text style={styles.detailRowLabel}>Entry Fee</Text>
                   <Text style={styles.detailRowValue}>
                     {selected.entryFee > 0 ? `Rs. ${selected.entryFee}` : 'Free Entry'}
                   </Text>
                 </View>
+                {selected.entryFee === 0 && (
+                  <View style={[styles.statusPill, styles.statusPillLive]}>
+                    <Text style={[styles.statusPillText, { color: GREEN }]}>FREE</Text>
+                  </View>
+                )}
               </View>
             </View>
 
-            {/* Organizer */}
+            {/* Organized By */}
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Organized By</Text>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionAccent} />
+                <Text style={styles.sectionTitle}>Organized By</Text>
+              </View>
               <View style={styles.organizerRow}>
                 <View style={styles.organizerLogo}>
-                  <Icon name="shield-checkmark" size={22} color={GREEN} />
+                  <Icon name="shield-checkmark" size={24} color={GREEN} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.organizerName}>Green Field Cricket Club</Text>
@@ -301,16 +359,25 @@ const EventsScreen = () => {
                     <Text style={styles.verifiedText}>Official organizer</Text>
                   </View>
                 </View>
+                <TouchableOpacity style={styles.contactBtn}>
+                  <Icon name="call-outline" size={13} color={GREEN} />
+                  <Text style={styles.contactBtnText}>Contact</Text>
+                </TouchableOpacity>
               </View>
             </View>
-
           </ScrollView>
 
-          {/* Bottom share button */}
+          {/* ── FOOTER ── */}
           <View style={[styles.detailFooter, { paddingBottom: insets.bottom + 12 }]}>
-            <TouchableOpacity style={styles.shareBtn} onPress={() => handleShare(selected)}>
-              <Icon name="share-social-outline" size={18} color="#fff" />
-              <Text style={styles.shareBtnText}>Share Event</Text>
+            <TouchableOpacity
+              style={styles.shareCircleBtn}
+              onPress={() => handleShare(selected)}
+            >
+              <Icon name="share-social-outline" size={20} color={GREEN} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.closeBtn} onPress={() => setSelected(null)}>
+              <Icon name="close-outline" size={18} color="#555" />
+              <Text style={styles.closeBtnText}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -329,16 +396,16 @@ const EventsScreen = () => {
           <Text style={styles.headerTitle}>Events</Text>
           <Text style={styles.headerSub}>Upcoming cricket events</Text>
         </View>
-        <View style={styles.notifBtn}>
+        <TouchableOpacity style={styles.notifBtn}>
           <Icon name="notifications-outline" size={22} color={DARK} />
           <View style={styles.notifDot} />
-        </View>
+        </TouchableOpacity>
       </View>
 
       {/* Search */}
-      <View style={styles.searchWrap}>
+      <View style={styles.searchRow}>
         <View style={styles.searchBar}>
-          <Icon name="search-outline" size={17} color="#AAA" />
+          <Icon name="search-outline" size={16} color="#AAA" />
           <TextInput
             style={styles.searchInput}
             placeholder="Search events..."
@@ -348,7 +415,7 @@ const EventsScreen = () => {
           />
           {!!search && (
             <TouchableOpacity onPress={() => setSearch('')}>
-              <Icon name="close-circle" size={17} color="#BBB" />
+              <Icon name="close-circle" size={16} color="#CCC" />
             </TouchableOpacity>
           )}
         </View>
@@ -357,21 +424,21 @@ const EventsScreen = () => {
       {/* List header */}
       <View style={styles.listHeaderRow}>
         <Text style={styles.listHeaderText}>All Events</Text>
-        <Text style={styles.listHeaderCount}>{filtered.length} events</Text>
+        <Text style={styles.listHeaderCount}>{filtered.length} event{filtered.length !== 1 ? 's' : ''}</Text>
       </View>
 
       <FlatList
         data={filtered}
         keyExtractor={i => i._id}
-        contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 120 }]}
+        contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 130 }]}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <View style={styles.emptyIconWrap}>
-              <Icon name="baseball-outline" size={38} color={GREEN} />
+            <View style={styles.emptyIcon}>
+              <Icon name="baseball-outline" size={36} color={GREEN} />
             </View>
             <Text style={styles.emptyTitle}>No events found</Text>
-            <Text style={styles.emptySubtitle}>
+            <Text style={styles.emptySub}>
               {search ? 'Try a different search term' : 'Check back soon for upcoming events'}
             </Text>
           </View>
@@ -391,103 +458,118 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#F6F7FB' },
 
   // Header
-  header: {
-    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
-    backgroundColor: '#fff', paddingHorizontal: 18, paddingBottom: 14,
-    borderBottomWidth: 1, borderBottomColor: '#F0F0F0',
-  },
+  header:      { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', backgroundColor: '#fff', paddingHorizontal: 18, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
   headerTitle: { fontSize: 24, fontWeight: '800', color: DARK },
   headerSub:   { fontSize: 12, color: '#999', marginTop: 2 },
   notifBtn:    { position: 'relative', marginTop: 4 },
   notifDot:    { position: 'absolute', top: 0, right: 0, width: 8, height: 8, borderRadius: 4, backgroundColor: '#EF4444', borderWidth: 1.5, borderColor: '#fff' },
 
   // Search
-  searchWrap: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
-  searchBar:  { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, gap: 8 },
-  searchInput:{ flex: 1, fontSize: 14, color: DARK, padding: 0 },
+  searchRow:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
+  searchBar:   { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, gap: 8 },
+  searchInput: { flex: 1, fontSize: 14, color: DARK, padding: 0 },
 
   // List header
   listHeaderRow:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 18, paddingTop: 16, paddingBottom: 10 },
   listHeaderText: { fontSize: 16, fontWeight: '800', color: DARK },
-  listHeaderCount:{ fontSize: 13, color: '#999', fontWeight: '500' },
+  listHeaderCount:{ fontSize: 13, color: '#999' },
 
   // List
   list: { paddingHorizontal: 16, gap: 12 },
 
   // Card
-  card: {
-    backgroundColor: '#fff', borderRadius: 16, flexDirection: 'row',
-    overflow: 'hidden', elevation: 2,
-    shadowColor: '#000', shadowOpacity: 0.06, shadowOffset: { width: 0, height: 2 }, shadowRadius: 8,
-  },
-  cardImageWrap: { width: 110, alignSelf: 'stretch' },
-  cardImage:     { width: 110, height: '100%', minHeight: 130 },
-  statusBadge:   { flexDirection: 'row', alignItems: 'center', gap: 4, position: 'absolute', top: 8, left: 8, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 },
-  statusDot:     { width: 6, height: 6, borderRadius: 3 },
-  statusBadgeText: { fontSize: 10, fontWeight: '700' },
+  card:        { backgroundColor: '#fff', borderRadius: 16, flexDirection: 'row', overflow: 'hidden', elevation: 2, shadowColor: '#000', shadowOpacity: 0.06, shadowOffset: { width: 0, height: 2 }, shadowRadius: 8 },
+  cardLeft:    { width: 110, position: 'relative' },
+  cardImage:   { width: 110, height: 130 },
+  cardBadge:   { position: 'absolute', top: 8, left: 8 },
+  cardBody:    { flex: 1, padding: 12, minHeight: 130 },
+  bookmarkBtn: { position: 'absolute', top: 10, right: 10 },
+  cardTitle:   { fontSize: 14, fontWeight: '800', color: DARK, marginBottom: 6, paddingRight: 26, lineHeight: 19 },
+  cardMeta:    { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 },
+  cardMetaText:{ fontSize: 11, color: '#666' },
+  viewBtn:     { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 6 },
+  viewBtnText: { fontSize: 12, color: GREEN, fontWeight: '700' },
 
-  cardBody:           { flex: 1, padding: 12 },
-  bookmarkBtn:        { position: 'absolute', top: 10, right: 10 },
-  cardTitle:          { fontSize: 14, fontWeight: '800', color: DARK, marginBottom: 6, paddingRight: 24, lineHeight: 19 },
-  cardMeta:           { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 },
-  cardMetaText:       { fontSize: 12, color: '#666' },
-  viewDetailsBtn:     { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 8 },
-  viewDetailsBtnText: { fontSize: 12, color: GREEN, fontWeight: '700' },
+  // Status badge
+  statusBadge:     { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 20 },
+  statusBadgeLive: { backgroundColor: 'rgba(10,143,60,0.88)' },
+  statusBadgePast: { backgroundColor: 'rgba(200,200,200,0.88)' },
+  statusDot:       { width: 6, height: 6, borderRadius: 3 },
+  statusBadgeText: { fontSize: 11, fontWeight: '700' },
 
   // Empty
-  empty:         { alignItems: 'center', marginTop: 60, gap: 10 },
-  emptyIconWrap: { width: 80, height: 80, borderRadius: 40, backgroundColor: GREEN_LIGHT, alignItems: 'center', justifyContent: 'center' },
-  emptyTitle:    { fontSize: 17, color: '#AAA', fontWeight: '700' },
-  emptySubtitle: { fontSize: 13, color: '#CCC', textAlign: 'center', paddingHorizontal: 40 },
+  empty:     { alignItems: 'center', marginTop: 60, gap: 10 },
+  emptyIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: GREEN_LIGHT, alignItems: 'center', justifyContent: 'center' },
+  emptyTitle:{ fontSize: 17, color: '#AAA', fontWeight: '700' },
+  emptySub:  { fontSize: 13, color: '#CCC', textAlign: 'center', paddingHorizontal: 40 },
 
   // ── Detail Modal ─────────────────────────────────────────────
-  detailRoot:   { flex: 1, backgroundColor: '#F6F7FB' },
 
-  detailBanner:        { height: 280, position: 'relative' },
-  detailBannerFill:    { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  detailBannerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.42)' },
+  detailRoot: { flex: 1, backgroundColor: '#F4F6F9' },
 
-  detailTopBar:   { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16 },
-  detailBackBtn:  { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center' },
-  detailTopRight: { flexDirection: 'row', gap: 10 },
-  detailIconBtn:  { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center' },
+  // HERO — fixed height, content BELOW this (no overlap)
+  hero:           { height: 260 },
+  heroScrimTop:   { position: 'absolute', top: 0, left: 0, right: 0, height: 120, backgroundColor: 'rgba(0,0,0,0.52)' },
+  heroScrimBottom:{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 150, backgroundColor: 'rgba(0,0,0,0.55)' },
 
-  detailStatusRow:    { position: 'absolute', top: 110, left: 16 },
-  detailBannerText:   { position: 'absolute', bottom: 20, left: 16, right: 16 },
-  detailBannerTitle:  { fontSize: 22, fontWeight: '900', color: '#fff', lineHeight: 28 },
-  detailLocationRow:  { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 },
-  detailLocationText: { fontSize: 13, color: 'rgba(255,255,255,0.85)' },
+  heroNav:      { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14 },
+  heroNavTitle: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  heroNavRight: { flexDirection: 'row', gap: 8 },
+  heroBtn:      { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
 
+  heroChips:        { position: 'absolute', top: 100, left: 14, flexDirection: 'row', gap: 8 },
+  heroChipSport:    { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.18)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  heroChipText:     { fontSize: 11, fontWeight: '700', color: '#fff' },
+
+  heroBottom:    { position: 'absolute', bottom: 16, left: 14, right: 14 },
+  heroTitle:     { fontSize: 20, fontWeight: '900', color: '#fff', lineHeight: 26, marginBottom: 8, letterSpacing: -0.3 },
+  heroMeta:      { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
+  heroMetaItem:  { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  heroMetaText:  { fontSize: 12, color: 'rgba(255,255,255,0.85)', fontWeight: '500' },
+
+  // Scroll body starts right below hero — NO negative marginTop
   detailScroll: { flex: 1 },
 
-  // Stats card
-  statsCard:  { flexDirection: 'row', backgroundColor: '#fff', marginHorizontal: 16, marginTop: -22, borderRadius: 16, padding: 16, elevation: 5, shadowColor: '#000', shadowOpacity: 0.09, shadowOffset: { width: 0, height: 3 }, shadowRadius: 8 },
-  statItem:   { flex: 1, alignItems: 'center', gap: 5 },
-  statValue:  { fontSize: 12, fontWeight: '700', color: DARK, textAlign: 'center' },
-  statLabel:  { fontSize: 10, color: '#AAA', fontWeight: '500' },
-  statDivider:{ width: 1, backgroundColor: '#F0F0F0', marginVertical: 4 },
+  // Stats card — sits at top of scroll, NOT floating over image
+  statsCard:   { flexDirection: 'row', backgroundColor: '#fff', marginHorizontal: 14, marginTop: 14, borderRadius: 18, paddingVertical: 18, paddingHorizontal: 6, elevation: 3, shadowColor: '#000', shadowOpacity: 0.07, shadowOffset: { width: 0, height: 2 }, shadowRadius: 8 },
+  statItem:    { flex: 1, alignItems: 'center', gap: 6 },
+  statIconWrap:{ width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  statVal:     { fontSize: 11, fontWeight: '800', color: DARK, textAlign: 'center' },
+  statLbl:     { fontSize: 10, color: '#BBB', fontWeight: '600' },
+  statDivider: { width: 1, backgroundColor: '#F0F0F0', marginVertical: 10 },
 
-  // Sections
-  section:      { backgroundColor: '#fff', marginHorizontal: 16, marginTop: 12, borderRadius: 16, padding: 16 },
-  sectionTitle: { fontSize: 16, fontWeight: '800', color: DARK, marginBottom: 14 },
-  sectionText:  { fontSize: 14, color: '#555', lineHeight: 22 },
+  // Section
+  section:       { backgroundColor: '#fff', marginHorizontal: 14, marginTop: 12, borderRadius: 18, padding: 18 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
+  sectionAccent: { width: 4, height: 18, borderRadius: 2, backgroundColor: GREEN },
+  sectionTitle:  { fontSize: 15, fontWeight: '800', color: DARK },
+  sectionText:   { fontSize: 14, color: '#555', lineHeight: 22 },
 
   // Detail rows
-  detailRow:      { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
-  detailRowIcon:  { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  detailRowText:  { flex: 1 },
-  detailRowLabel: { fontSize: 11, color: '#AAA', fontWeight: '500' },
-  detailRowValue: { fontSize: 14, color: DARK, fontWeight: '700', marginTop: 2 },
+  detailRow:       { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12 },
+  detailRowBorder: { borderBottomWidth: 1, borderBottomColor: '#F4F4F4' },
+  detailRowIcon:   { width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  detailRowLabel:  { fontSize: 11, color: '#BBB', fontWeight: '600', marginBottom: 3 },
+  detailRowValue:  { fontSize: 14, color: DARK, fontWeight: '700' },
+
+  // Status pills (inside detail rows)
+  statusPill:     { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  statusPillLive: { backgroundColor: GREEN_LIGHT },
+  statusPillPast: { backgroundColor: '#F0F0F0' },
+  statusPillText: { fontSize: 11, fontWeight: '700' },
 
   // Organizer
-  organizerRow:  { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  organizerLogo: { width: 48, height: 48, borderRadius: 14, backgroundColor: GREEN_LIGHT, alignItems: 'center', justifyContent: 'center' },
-  organizerName: { fontSize: 15, fontWeight: '800', color: DARK },
-  verifiedRow:   { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
+  organizerRow:  { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  organizerLogo: { width: 52, height: 52, borderRadius: 16, backgroundColor: GREEN_LIGHT, alignItems: 'center', justifyContent: 'center' },
+  organizerName: { fontSize: 14, fontWeight: '800', color: DARK, marginBottom: 4 },
+  verifiedRow:   { flexDirection: 'row', alignItems: 'center', gap: 4 },
   verifiedText:  { fontSize: 12, color: GREEN, fontWeight: '600' },
+  contactBtn:    { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1.5, borderColor: '#C8EDD8', backgroundColor: GREEN_LIGHT, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20 },
+  contactBtnText:{ fontSize: 12, color: GREEN, fontWeight: '700' },
 
   // Footer
-  detailFooter: { backgroundColor: '#fff', paddingHorizontal: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F0F0F0' },
-  shareBtn:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: GREEN, borderRadius: 14, paddingVertical: 14 },
-  shareBtnText: { fontSize: 15, fontWeight: '800', color: '#fff' },
+  detailFooter:   { backgroundColor: '#fff', paddingHorizontal: 16, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#F0F0F0', flexDirection: 'row', gap: 12 },
+  shareCircleBtn: { width: 50, height: 50, borderRadius: 25, borderWidth: 1.5, borderColor: '#C8EDD8', backgroundColor: GREEN_LIGHT, alignItems: 'center', justifyContent: 'center' },
+  closeBtn:       { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#F4F6F9', borderRadius: 14, paddingVertical: 14, borderWidth: 1, borderColor: '#E8E8E8' },
+  closeBtnText:   { fontSize: 15, fontWeight: '700', color: '#555' },
 });

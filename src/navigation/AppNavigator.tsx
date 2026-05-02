@@ -1,26 +1,30 @@
 import React, { useState, useEffect } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { View, ActivityIndicator } from 'react-native';
+import { NavigationContainer }     from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { useDispatch, useSelector } from 'react-redux';
+import { useDispatch, useSelector }   from 'react-redux';
 
 import UserTabs         from './UserTabs';
 import AdminTabs        from './AdminTabs';
 import AdminLoginScreen from '../screens/admin/AdminLoginScreen';
 import UserLoginScreen  from '../screens/user/UserLoginScreen';
 
-import { restoreUserSession } from '../services/authService';
-import { userLoginSuccess }   from '../store/slices/authSlice';
-import { RootState }          from '../store';
+import { restoreUserSession, logoutUser } from '../services/authService';
+import { userLoginSuccess, userLogout, adminLogout } from '../store/slices/authSlice';
+import { RootState } from '../store';
 
 const Stack = createNativeStackNavigator();
 
-// ─── User flow: Login guard → UserTabs + AdminLogin modal ────────
-const UserStack = ({ onAdminLogin }: { onAdminLogin: () => void }) => {
-  const dispatch        = useDispatch();
-  const isUserLoggedIn  = useSelector((s: RootState) => s.auth.isUserLoggedIn);
-  const [checking, setChecking] = useState(true);
+const AppNavigator = () => {
+  const dispatch       = useDispatch();
+  const isUserLoggedIn = useSelector((s: RootState) => s.auth.isUserLoggedIn);
+  const isAdmin        = useSelector((s: RootState) => s.auth.isAdmin);
+  const userId         = useSelector((s: RootState) => s.auth.userId);
 
-  // On mount: restore session from AsyncStorage
+  const [booting,        setBooting]        = useState(true);
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+
+  // Restore session on app start
   useEffect(() => {
     (async () => {
       try {
@@ -29,58 +33,54 @@ const UserStack = ({ onAdminLogin }: { onAdminLogin: () => void }) => {
           dispatch(userLoginSuccess({ name: session.name, userId: session.userId }));
         }
       } catch (_) {}
-      finally { setChecking(false); }
+      finally { setBooting(false); }
     })();
   }, []);
 
-  // While checking AsyncStorage show nothing (avoids flash)
-  if (checking) return null;
+  const handleUserLogout = async () => {
+    await logoutUser();
+    dispatch(userLogout());
+    dispatch(adminLogout());
+    setShowAdminLogin(false);
+  };
 
-  // Not logged in → show login screen
-  if (!isUserLoggedIn) {
-    return (
-      <UserLoginScreen
-        onLoginSuccess={() => {/* Redux state update triggers re-render */}}
-      />
-    );
-  }
+  const handleAdminLogout = () => {
+    dispatch(adminLogout());
+  };
 
-  // Logged in → show main tabs + admin login modal
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="UserTabs">
-        {(props) => (
-          <UserTabs
-            {...props}
-            openAdminLogin={() =>
-              (props.navigation as any).navigate('AdminLogin')
-            }
-          />
-        )}
-      </Stack.Screen>
-      <Stack.Screen
-        name="AdminLogin"
-        options={{ presentation: 'modal', headerShown: false }}
-      >
-        {() => <AdminLoginScreen onLogin={onAdminLogin} />}
-      </Stack.Screen>
-    </Stack.Navigator>
-  );
-};
-
-// ─── Root navigator ───────────────────────────────────────────────
-const AppNavigator = () => {
-  const [isAdmin, setIsAdmin] = useState(false);
-
-  const handleAdminLogin  = () => setIsAdmin(true);
-  const handleAdminLogout = () => setIsAdmin(false);
-
+  // ── Single NavigationContainer always rendered ───────────────
   return (
     <NavigationContainer>
-      {isAdmin ? (
+      {booting ? (
+        // Spinner while checking AsyncStorage
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator size="large" color="#0A8F3C" />
+        </View>
+      ) : !isUserLoggedIn ? (
+        // Not logged in — onLoginSuccess was empty () => {}, fixed below
+        <UserLoginScreen onLoginSuccess={() => {}} />
+      ) : isAdmin ? (
+        // Admin dashboard
         <AdminTabs onLogout={handleAdminLogout} />
+      ) : showAdminLogin ? (
+        // Admin login modal
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="AdminLogin">
+            {() => (
+              <AdminLoginScreen
+                onLogin={() => setShowAdminLogin(false)}
+              />
+            )}
+          </Stack.Screen>
+        </Stack.Navigator>
       ) : (
-        <UserStack onAdminLogin={handleAdminLogin} />
+        // key=userId forces full remount of UserTabs when a different user logs in
+        // This guarantees all screens are fresh with no stale data from previous user
+        <UserTabs
+          key={userId}
+          openAdminLogin={() => setShowAdminLogin(true)}
+          onLogout={handleUserLogout}
+        />
       )}
     </NavigationContainer>
   );

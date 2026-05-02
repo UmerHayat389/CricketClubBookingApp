@@ -113,7 +113,7 @@ const UserLoginScreen = ({ onLoginSuccess }: Props) => {
             <Icon name="person-outline" size={18} color="#AAA" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
-              placeholder="e.g. Ahmed Khan"
+              placeholder="e.g. Enter Your Name"
               placeholderTextColor="#CCC"
               value={name}
               onChangeText={setName}

@@ -2,10 +2,13 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import {
-  View, Text, StyleSheet, Platform, TouchableOpacity,
+  View,
+  Text,
+  StyleSheet,
+  Platform,
+  TouchableOpacity,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import HomeScreen     from '../screens/user/HomeScreen';
 import BookSlotScreen from '../screens/user/BookSlotScreen';
@@ -13,10 +16,12 @@ import BookingsScreen from '../screens/user/BookingsScreen';
 import EventsScreen   from '../screens/user/EventsScreen';
 import SettingsScreen from '../screens/user/SettingsScreen';
 
-/* ─── Dimensions — match reference exactly ──────────────────────────────── */
-const FAB_SIZE   = 54;   // green circle diameter
-const FAB_RISE   = 20;   // how far FAB centre sits above bar top edge
-const BAR_HEIGHT = 62;   // white bar height (excluding safe area)
+/* ─── Dimensions ─────────────────────────────────────────────────────────── */
+const TAB_HEIGHT   = Platform.OS === 'ios' ? 82 : 64;
+const FAB_SIZE     = 56;
+const FAB_RADIUS   = FAB_SIZE / 2;
+// How many px the circle protrudes above the tab bar top edge
+const FAB_PROTRUDE = 18;
 
 /* ─── Stacks ─────────────────────────────────────────────────────────────── */
 const Tab              = createBottomTabNavigator();
@@ -44,30 +49,30 @@ const BookNowStack = () => (
   </BookNowStackNav.Navigator>
 );
 
-/* ─── Tab definitions — matches reference: Home Bookings [FAB] Events Profile ── */
+/* ─── Tab config ─────────────────────────────────────────────────────────── */
 const TABS = [
-  { name: 'Home',     label: 'Home',     active: 'home',          inactive: 'home-outline'      },
-  { name: 'Bookings', label: 'Bookings', active: 'calendar',      inactive: 'calendar-outline'  },
-  { name: 'BookNow',  label: 'Book Now', active: null,             inactive: null                },
-  { name: 'Events',   label: 'Events',   active: 'trophy',        inactive: 'trophy-outline'    },
-  { name: 'Settings', label: 'Profile',  active: 'person',        inactive: 'person-outline'    },
+  { name: 'Home',     label: 'Home',     active: 'home',     inactive: 'home-outline'     },
+  { name: 'Bookings', label: 'Bookings', active: 'calendar', inactive: 'calendar-outline' },
+  { name: 'BookNow',  label: 'Book Now', active: null,        inactive: null               },
+  { name: 'Events',   label: 'Events',   active: 'trophy',   inactive: 'trophy-outline'   },
+  { name: 'Settings', label: 'Settings', active: 'settings', inactive: 'settings-outline' },
 ];
 
 /* ─── Custom Tab Bar ─────────────────────────────────────────────────────── */
 const CustomTabBar = ({ state, navigation }: any) => {
-  const insets   = useSafeAreaInsets();
-  const safeBot  = insets.bottom > 0 ? insets.bottom : (Platform.OS === 'ios' ? 20 : 0);
-  const barTotal = BAR_HEIGHT + safeBot;
-  // Wrapper must be tall enough so the FAB circle (which rises above the bar) never clips
-  const wrapperH = barTotal + FAB_RISE + FAB_SIZE / 2;
-
   return (
-    <View style={[styles.wrapper, { height: wrapperH }]}>
-      <View style={[styles.bar, { height: barTotal, paddingBottom: safeBot + 4 }]}>
+    /**
+     * Outer wrapper is taller than the visual bar to give the FAB
+     * circle room to protrude upward without clipping.
+     * overflow: 'visible' is critical on both wrapper and bar.
+     */
+    <View style={styles.wrapper}>
+      {/* White bar surface */}
+      <View style={styles.bar}>
 
         {TABS.map((tab, index) => {
-          const focused  = state.index === index;
-          const isCenter = tab.name === 'BookNow';
+          const focused   = state.index === index;
+          const isCenter  = tab.name === 'BookNow';
 
           const navigate = () => {
             const route = state.routes[index];
@@ -81,52 +86,47 @@ const CustomTabBar = ({ state, navigation }: any) => {
             }
           };
 
-          /* ── Centre FAB ── */
+          /* ── Centre FAB slot ── */
           if (isCenter) {
-            // FAB circle top = negative of (FAB_RISE + FAB_SIZE/2) relative to bar top
-            const fabTop = -(FAB_RISE + FAB_SIZE / 2);
             return (
               <View key={tab.name} style={styles.fabSlot}>
+                {/* Circle floats above bar */}
                 <TouchableOpacity
                   onPress={navigate}
                   activeOpacity={0.85}
-                  style={[styles.fabCircle, { top: fabTop }]}
+                  style={styles.fabCircle}
                 >
-                  <Icon name="add" size={30} color="#fff" />
+                  <Icon name="add" size={32} color="#fff" />
                 </TouchableOpacity>
-                {/* Label sits in the bar below the FAB — same vertical level as other labels */}
-                <Text style={[styles.fabLabel, focused && styles.fabLabelFocused]}>
-                  {tab.label}
-                </Text>
+                {/* Label below, inside bar */}
+                <Text style={styles.fabLabel}>{tab.label}</Text>
               </View>
             );
           }
 
           /* ── Normal tab ── */
-          const iconName = focused ? tab.active! : tab.inactive!;
-          const color    = focused ? '#0A8F3C' : '#AAAAAA';
+          const iconName  = focused ? tab.active! : tab.inactive!;
+          const color     = focused ? '#0A8F3C' : '#AAAAAA';
 
           return (
             <TouchableOpacity
               key={tab.name}
               style={styles.tabItem}
               onPress={navigate}
-              activeOpacity={0.75}
+              activeOpacity={0.7}
             >
-              {/* Icon — no pill/background, just icon color changes like reference */}
-              <Icon name={iconName} size={24} color={color} />
+              <Icon name={iconName} size={22} color={color} />
               <Text style={[styles.tabLabel, { color }]}>{tab.label}</Text>
             </TouchableOpacity>
           );
         })}
-
       </View>
     </View>
   );
 };
 
-/* ─── UserTabs navigator ─────────────────────────────────────────────────── */
-const UserTabs = ({ openAdminLogin }: { openAdminLogin: () => void }) => (
+/* ─── UserTabs ───────────────────────────────────────────────────────────── */
+const UserTabs = ({ openAdminLogin, onLogout }: { openAdminLogin: () => void; onLogout: () => void }) => (
   <Tab.Navigator
     tabBar={(props) => <CustomTabBar {...props} />}
     screenOptions={{ headerShown: false }}
@@ -136,100 +136,116 @@ const UserTabs = ({ openAdminLogin }: { openAdminLogin: () => void }) => (
     <Tab.Screen name="BookNow"  component={BookNowStack}  />
     <Tab.Screen name="Events"   component={EventsScreen}  />
     <Tab.Screen name="Settings">
-      {(props) => <SettingsScreen {...props} openAdminLogin={openAdminLogin} />}
+      {(props) => <SettingsScreen {...props} openAdminLogin={openAdminLogin} onLogout={onLogout} />}
     </Tab.Screen>
   </Tab.Navigator>
 );
 
 export default UserTabs;
 
-/* ─── Styles ─────────────────────────────────────────────────────────────── */
+/* ─────────────────────────── Styles ─────────────────────────────────────── */
 const styles = StyleSheet.create({
 
-  // Outer wrapper — tall enough to show FAB above bar, transparent background
+  /**
+   * Outer wrapper:
+   * - sits at the very bottom of the screen, full width, no side margins
+   * - height = bar + the protrusion so the FAB circle is never clipped
+   * - overflow visible so the circle shadow also shows
+   */
   wrapper: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
+    height: TAB_HEIGHT + FAB_PROTRUDE,
     overflow: 'visible',
-    backgroundColor: 'transparent',
+    // push bottom-of-bar to screen bottom on iOS (home indicator)
+    paddingBottom: 0,
   },
 
-  // White bar — always pinned to bottom of wrapper
+  /**
+   * White bar:
+   * - positioned at the bottom of wrapper
+   * - top border line like the screenshot
+   * - NO rounded corners (screenshot shows full-width flat bar)
+   */
   bar: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
+    height: TAB_HEIGHT,
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
-    borderTopColor: '#E8E8E8',
-    // Center items vertically in bar so icons + labels sit mid-bar
-    alignItems: 'center',
+    borderTopColor: '#EFEFEF',
+    alignItems: 'flex-start',   // items align from bar top so FAB can go above
+    paddingBottom: Platform.OS === 'ios' ? 20 : 6,
+    paddingTop: 8,
+    // shadow upward
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -2 },
     shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 18,
-    overflow: 'visible',   // REQUIRED — lets FAB render above
+    shadowRadius: 8,
+    elevation: 12,
+    overflow: 'visible',
   },
 
-  // ── Normal tab ──────────────────────────────────────────────
+  /* Regular tab */
   tabItem: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     gap: 3,
+    paddingTop: 2,
   },
   tabLabel: {
-    fontSize: 10,
+    fontSize: 10.5,
     fontWeight: '500',
-    lineHeight: 13,
+    marginTop: 1,
   },
 
-  // ── FAB centre slot ──────────────────────────────────────────
+  /**
+   * Centre FAB slot:
+   * flex:1 like other tabs, but the circle is absolutely positioned
+   * so it floats FAB_PROTRUDE px above the bar top.
+   */
   fabSlot: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     overflow: 'visible',
-    // Push content down so label aligns with other tab labels
-    // The circle is absolutely positioned so it doesn't affect layout
-    gap: 3,
-    paddingTop: FAB_SIZE * 0.6,
+    paddingTop: 0,
   },
 
-  // Green circle floating above bar
+  /**
+   * The green circle:
+   * - top: -(FAB_SIZE - FAB_PROTRUDE - 8) pulls it above the bar top edge
+   *   so exactly FAB_PROTRUDE px of it sticks out above
+   * - position absolute so it doesn't affect bar layout
+   */
   fabCircle: {
     position: 'absolute',
+    top: -(FAB_PROTRUDE + 2),
     width: FAB_SIZE,
     height: FAB_SIZE,
-    borderRadius: FAB_SIZE / 2,
+    borderRadius: FAB_RADIUS,
     backgroundColor: '#0A8F3C',
     alignItems: 'center',
     justifyContent: 'center',
-    // White ring border — visible in reference
-    borderWidth: 4,
-    borderColor: '#FFFFFF',
-    // Green shadow
     shadowColor: '#0A8F3C',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
+    shadowOpacity: 0.38,
     shadowRadius: 10,
-    elevation: 16,
-    zIndex: 99,
+    elevation: 14,
+    zIndex: 10,
   },
 
+  /* "Book Now" text label — sits inside the bar below the circle */
   fabLabel: {
-    fontSize: 10,
-    fontWeight: '500',
-    color: '#AAAAAA',
-    lineHeight: 13,
-  },
-  fabLabelFocused: {
-    color: '#0A8F3C',
+    fontSize: 10.5,
     fontWeight: '700',
+    color: '#0A8F3C',
+    marginTop: FAB_SIZE - FAB_PROTRUDE + 4, // push below the protruding circle
   },
 });

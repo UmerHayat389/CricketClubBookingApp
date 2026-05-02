@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 
 const bookingSchema = new mongoose.Schema(
   {
+    userId:   { type: String, default: '' },   // links booking to a user account
     userName: { type: String, required: true },
     phone: { type: String, required: true },
     slotTime: { type: String, required: true },

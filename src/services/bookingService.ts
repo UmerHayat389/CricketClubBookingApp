@@ -7,8 +7,17 @@ export const createBooking = async (formData: any) => {
   return res.data;
 };
 
-// Pass a date string (YYYY-MM-DD) to filter by date on the server
-export const getBookings = async (date?: string) => {
+// User: filter by userId (only their own bookings)
+export const getBookings = async (userId?: string, date?: string) => {
+  const params: Record<string, string> = {};
+  if (userId) params.userId = userId;
+  if (date)   params.date   = date;
+  const res = await API.get('/bookings', { params });
+  return res.data;
+};
+
+// Admin: get ALL bookings, optionally filtered by date only
+export const getAllBookings = async (date?: string) => {
   const params: Record<string, string> = {};
   if (date) params.date = date;
   const res = await API.get('/bookings', { params });

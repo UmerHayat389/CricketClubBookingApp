@@ -1,23 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Switch,
-  Alert,
-  Linking,
+  View, Text, StyleSheet, ScrollView,
+  TouchableOpacity, Switch, Alert, Linking, Animated, Modal, Pressable,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import { useSelector } from 'react-redux';
 import { RootState } from '../../store';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { logoutUser } from '../../services/authService';
 
 interface Props {
   openAdminLogin: () => void;
+  onLogout: () => void;
 }
 
+// ── Reusable row components (unchanged) ───────────────────────────────────
 const SectionHeader = ({ title }: { title: string }) => (
   <Text style={styles.sectionTitle}>{title}</Text>
 );
@@ -79,12 +76,57 @@ const RowValue = ({
   </View>
 );
 
-const SettingsScreen = ({ openAdminLogin }: Props) => {
+// ══════════════════════════════════════════════════════════════════════════
+const SettingsScreen = ({ openAdminLogin, onLogout }: Props) => {
   const insets   = useSafeAreaInsets();
   const userName = useSelector((state: RootState) => state.auth.userName);
+
   const [notifications, setNotifications] = useState(true);
-  const [bookingAlerts, setBookingAlerts]   = useState(true);
-  const [eventAlerts, setEventAlerts]       = useState(false);
+  const [bookingAlerts, setBookingAlerts]  = useState(true);
+  const [eventAlerts,   setEventAlerts]    = useState(false);
+
+  // ── Custom logout modal state ──────────────────────────────────
+  const [logoutModalVisible, setLogoutModalVisible] = useState(false);
+  const modalScale = useRef(new Animated.Value(0.88)).current;
+  const modalOpacity = useRef(new Animated.Value(0)).current;
+
+  const openLogoutModal = () => {
+    setLogoutModalVisible(true);
+    Animated.parallel([
+      Animated.spring(modalScale, { toValue: 1, useNativeDriver: true, tension: 80, friction: 8 }),
+      Animated.timing(modalOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+    ]).start();
+  };
+
+  const closeLogoutModal = () => {
+    Animated.parallel([
+      Animated.timing(modalScale, { toValue: 0.88, duration: 160, useNativeDriver: true }),
+      Animated.timing(modalOpacity, { toValue: 0, duration: 160, useNativeDriver: true }),
+    ]).start(() => setLogoutModalVisible(false));
+  };
+
+  // ── Toast ──────────────────────────────────────────────────────
+  const toastOpacity = useRef(new Animated.Value(0)).current;
+  const [toastMsg, setToastMsg] = useState('');
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    Animated.sequence([
+      Animated.timing(toastOpacity, { toValue: 1, duration: 250, useNativeDriver: true }),
+      Animated.delay(1800),
+      Animated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start();
+  };
+
+  const handleLogout = () => {
+    openLogoutModal();
+  };
+
+  const confirmLogout = async () => {
+    closeLogoutModal();
+    await logoutUser();
+    onLogout();
+  };
 
   return (
     <View style={styles.screen}>
@@ -93,8 +135,10 @@ const SettingsScreen = ({ openAdminLogin }: Props) => {
         <Text style={styles.headerSub}>Manage your preferences</Text>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 100 }]}>
-
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 80 }]}
+      >
         {/* Profile card */}
         <View style={styles.profileCard}>
           <View style={styles.avatar}>
@@ -168,83 +212,139 @@ const SettingsScreen = ({ openAdminLogin }: Props) => {
             onPress={() => Alert.alert('Privacy', 'We respect your privacy.')} />
           <View style={styles.divider} />
           <RowArrow icon="trash-outline" iconBg="#78909C" label="Clear Cache"
-            onPress={() =>
-              Alert.alert('Clear Cache', 'Clear app cache?', [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Clear', style: 'destructive', onPress: () => Alert.alert('Done', 'Cache cleared.') },
-              ])
-            } />
+            onPress={() => Alert.alert('Clear Cache', 'Clear app cache?', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Clear', style: 'destructive', onPress: () => showToast('Cache cleared') },
+            ])} />
           <View style={styles.divider} />
           <RowArrow icon="star-outline" iconBg="#FF8F00" label="Rate the App"
-            onPress={() => Alert.alert('Rate', 'Thank you for your support!')} />
+            onPress={() => showToast('Thanks for your support! ⭐')} />
           <View style={styles.divider} />
           <RowArrow icon="share-social-outline" iconBg="#F57C00" label="Share App"
-            onPress={() => Alert.alert('Share', 'Share link copied!')} />
+            onPress={() => showToast('Share link copied!')} />
         </View>
 
-        {/* Admin Login */}
+        {/* ── Administration ── */}
         <SectionHeader title="Administration" />
         <TouchableOpacity style={styles.adminBtn} onPress={openAdminLogin} activeOpacity={0.85}>
-          <View style={styles.adminBtnIcon}>
-            <Icon name="shield-outline" size={22} color="#0A8F3C" />
+          {/* subtle shimmer stripe */}
+          <View style={styles.adminBtnShimmer} />
+          <View style={styles.adminBtnLeft}>
+            <View style={styles.adminBtnIcon}>
+              <Icon name="shield-checkmark" size={22} color="#0A8F3C" />
+            </View>
+            <View>
+              <Text style={styles.adminBtnLabel}>Admin Panel</Text>
+              <Text style={styles.adminBtnSub}>Access club management</Text>
+            </View>
           </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.adminBtnLabel}>Admin Login</Text>
-            <Text style={styles.adminBtnSub}>Access club management panel</Text>
+          <View style={styles.adminBtnArrow}>
+            <Icon name="chevron-forward" size={16} color="#fff" />
           </View>
-          <Icon name="chevron-forward" size={16} color="#0A8F3C" />
         </TouchableOpacity>
 
-        <View style={{ height: 30 }} />
+        {/* ── Account / Logout ── */}
+        <SectionHeader title="Account" />
+        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} activeOpacity={0.82}>
+          <View style={styles.logoutLeft}>
+            <View style={styles.logoutIconWrap}>
+              <Icon name="log-out-outline" size={20} color="#fff" />
+            </View>
+            <View>
+              <Text style={styles.logoutLabel}>Log Out</Text>
+              <Text style={styles.logoutSub}>Sign out from your account</Text>
+            </View>
+          </View>
+          <View style={styles.logoutArrow}>
+            <Icon name="chevron-forward" size={15} color="#E53935" />
+          </View>
+        </TouchableOpacity>
+
       </ScrollView>
+
+      {/* ── Custom Logout Confirmation Modal ── */}
+      <Modal
+        transparent
+        visible={logoutModalVisible}
+        animationType="none"
+        onRequestClose={closeLogoutModal}
+        statusBarTranslucent
+      >
+        <Pressable style={styles.modalBackdrop} onPress={closeLogoutModal}>
+          <Animated.View
+            style={[styles.modalCard, { transform: [{ scale: modalScale }], opacity: modalOpacity }]}
+          >
+            <Pressable>
+              {/* Icon header */}
+              <View style={styles.modalIconWrap}>
+                <View style={styles.modalIconRing}>
+                  <Icon name="log-out-outline" size={28} color="#E53935" />
+                </View>
+              </View>
+
+              <Text style={styles.modalTitle}>Log Out</Text>
+              <Text style={styles.modalBody}>
+                Are you sure you want to log out of your account?
+              </Text>
+
+              {/* Divider */}
+              <View style={styles.modalDivider} />
+
+              {/* Buttons */}
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.cancelBtn} onPress={closeLogoutModal} activeOpacity={0.75}>
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.confirmBtn} onPress={confirmLogout} activeOpacity={0.82}>
+                  <Icon name="log-out-outline" size={16} color="#fff" style={{ marginRight: 6 }} />
+                  <Text style={styles.confirmBtnText}>Log Out</Text>
+                </TouchableOpacity>
+              </View>
+            </Pressable>
+          </Animated.View>
+        </Pressable>
+      </Modal>
+
+      {/* ── Toast ── */}
+      <Animated.View style={[styles.toast, { opacity: toastOpacity }]} pointerEvents="none">
+        <Icon name="checkmark-circle" size={16} color="#fff" />
+        <Text style={styles.toastText}>{toastMsg}</Text>
+      </Animated.View>
+
     </View>
   );
 };
 
 export default SettingsScreen;
 
+// ── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#F6F7FB' },
 
   header: {
     backgroundColor: '#fff',
-    paddingBottom: 18,
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    paddingBottom: 18, paddingHorizontal: 20,
+    borderBottomWidth: 1, borderBottomColor: '#F0F0F0',
   },
   headerTitle: { fontSize: 26, fontWeight: '800', color: '#111', letterSpacing: -0.5 },
-  headerSub: { fontSize: 13, color: '#999', marginTop: 2 },
+  headerSub:   { fontSize: 13, color: '#999', marginTop: 2 },
 
   scroll: { paddingTop: 20, paddingHorizontal: 16 },
 
   profileCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    marginBottom: 24,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 6,
+    backgroundColor: '#fff', borderRadius: 16, padding: 16,
+    flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 24,
+    elevation: 1, shadowColor: '#000', shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 2 }, shadowRadius: 6,
   },
   avatar: {
     width: 56, height: 56, borderRadius: 28,
-    backgroundColor: '#E8F5EE',
-    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#E8F5EE', alignItems: 'center', justifyContent: 'center',
   },
-  profileName: { fontSize: 16, fontWeight: '700', color: '#111' },
-  profileRole: { fontSize: 13, color: '#888', marginTop: 2 },
-  memberBadge: {
-    backgroundColor: '#E8F5EE',
-    paddingHorizontal: 10, paddingVertical: 4,
-    borderRadius: 20,
-    borderWidth: 1, borderColor: '#C8EDD8',
-  },
+  profileName:     { fontSize: 16, fontWeight: '700', color: '#111' },
+  profileRole:     { fontSize: 13, color: '#888', marginTop: 2 },
+  memberBadge:     { backgroundColor: '#E8F5EE', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, borderWidth: 1, borderColor: '#C8EDD8' },
   memberBadgeText: { fontSize: 11, color: '#0A8F3C', fontWeight: '700' },
 
   sectionTitle: {
@@ -254,53 +354,197 @@ const styles = StyleSheet.create({
   },
 
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    marginBottom: 24,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 6,
+    backgroundColor: '#fff', borderRadius: 16, marginBottom: 24,
+    elevation: 1, shadowColor: '#000', shadowOpacity: 0.04,
+    shadowOffset: { width: 0, height: 2 }, shadowRadius: 6,
     overflow: 'hidden',
   },
 
-  row: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 13, gap: 14,
-  },
-  iconBox: {
-    width: 34, height: 34, borderRadius: 9,
-    alignItems: 'center', justifyContent: 'center',
-  },
+  row:        { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13, gap: 14 },
+  iconBox:    { width: 34, height: 34, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
   rowContent: { flex: 1 },
-  rowLabel: { fontSize: 14, fontWeight: '600', color: '#1A1A1A' },
-  rowSub: { fontSize: 12, color: '#AAAAAA', marginTop: 1 },
-  rowValue: { fontSize: 13, color: '#666', fontWeight: '600' },
+  rowLabel:   { fontSize: 14, fontWeight: '600', color: '#1A1A1A' },
+  rowSub:     { fontSize: 12, color: '#AAAAAA', marginTop: 1 },
+  rowValue:   { fontSize: 13, color: '#666', fontWeight: '600' },
 
   divider: { height: 1, backgroundColor: '#F5F5F5', marginLeft: 64 },
 
+  // ── Admin button — refined dark-on-white with green accent ──
   adminBtn: {
+    backgroundColor: '#0A8F3C',
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    elevation: 5,
+    shadowColor: '#0A8F3C',
+    shadowOpacity: 0.40,
+    shadowOffset: { width: 0, height: 5 },
+    shadowRadius: 12,
+    overflow: 'hidden',
+  },
+  // Subtle diagonal shimmer stripe overlay
+  adminBtnShimmer: {
+    position: 'absolute',
+    top: -20, right: 60,
+    width: 60, height: 120,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    transform: [{ rotate: '20deg' }],
+  },
+  adminBtnLeft:  { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  adminBtnIcon:  {
+    width: 46, height: 46, borderRadius: 13,
+    backgroundColor: '#fff',
+    alignItems: 'center', justifyContent: 'center',
+    elevation: 2,
+    shadowColor: '#000', shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 2 }, shadowRadius: 4,
+  },
+  adminBtnLabel: { fontSize: 15, fontWeight: '800', color: '#fff', letterSpacing: 0.1 },
+  adminBtnSub:   { fontSize: 12, color: 'rgba(255,255,255,0.72)', marginTop: 2 },
+  adminBtnArrow: {
+    width: 32, height: 32, borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)',
+  },
+
+  // ── Logout button — crisp white card with red accent ──
+  logoutBtn: {
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    justifyContent: 'space-between',
     marginBottom: 8,
     borderWidth: 1.5,
-    borderColor: '#C8EDD8',
-    elevation: 1,
-    shadowColor: '#0A8F3C',
-    shadowOpacity: 0.08,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 6,
+    borderColor: '#FFCDD2',
+    elevation: 2,
+    shadowColor: '#E53935',
+    shadowOpacity: 0.10,
+    shadowOffset: { width: 0, height: 3 },
+    shadowRadius: 8,
   },
-  adminBtnIcon: {
-    width: 44, height: 44, borderRadius: 12,
-    backgroundColor: '#E8F5EE',
+  logoutLeft:     { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  logoutIconWrap: {
+    width: 46, height: 46, borderRadius: 13,
+    backgroundColor: '#E53935',
+    alignItems: 'center', justifyContent: 'center',
+    elevation: 3,
+    shadowColor: '#E53935', shadowOpacity: 0.35,
+    shadowOffset: { width: 0, height: 3 }, shadowRadius: 6,
+  },
+  logoutLabel:    { fontSize: 15, fontWeight: '800', color: '#E53935' },
+  logoutSub:      { fontSize: 12, color: '#AAAAAA', marginTop: 2 },
+  logoutArrow: {
+    width: 28, height: 28, borderRadius: 8,
+    backgroundColor: '#FFF0F0',
     alignItems: 'center', justifyContent: 'center',
   },
-  adminBtnLabel: { fontSize: 15, fontWeight: '700', color: '#0A8F3C' },
-  adminBtnSub: { fontSize: 12, color: '#888', marginTop: 1 },
+
+  // ── Custom Logout Modal ──
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 28,
+  },
+  modalCard: {
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    width: '100%',
+    paddingTop: 0,
+    paddingBottom: 24,
+    paddingHorizontal: 24,
+    elevation: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowOffset: { width: 0, height: 12 },
+    shadowRadius: 24,
+    overflow: 'hidden',
+  },
+  modalIconWrap: {
+    alignItems: 'center',
+    marginTop: 28,
+    marginBottom: 16,
+  },
+  modalIconRing: {
+    width: 68, height: 68, borderRadius: 34,
+    backgroundColor: '#FFF0F0',
+    borderWidth: 2, borderColor: '#FFCDD2',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#111',
+    textAlign: 'center',
+    marginBottom: 8,
+    letterSpacing: -0.3,
+  },
+  modalBody: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 21,
+    marginBottom: 24,
+    paddingHorizontal: 8,
+  },
+  modalDivider: {
+    height: 1,
+    backgroundColor: '#F2F2F2',
+    marginBottom: 20,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  cancelBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#F5F5F5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#EBEBEB',
+  },
+  cancelBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#555',
+  },
+  confirmBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#E53935',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    elevation: 4,
+    shadowColor: '#E53935',
+    shadowOpacity: 0.4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 8,
+  },
+  confirmBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
+
+  // Toast
+  toast: {
+    position: 'absolute', bottom: 100, alignSelf: 'center',
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: '#1A1A1A', paddingHorizontal: 18, paddingVertical: 12,
+    borderRadius: 24, elevation: 10,
+    shadowColor: '#000', shadowOpacity: 0.2, shadowOffset: { width: 0, height: 4 }, shadowRadius: 10,
+  },
+  toastText: { fontSize: 13, color: '#fff', fontWeight: '600' },
 });

@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   ActivityIndicator, RefreshControl, StatusBar, Modal,
@@ -12,71 +13,111 @@ import { getBookings } from '../../services/bookingService';
 import { setBookings, addBooking, updateBooking } from '../../store/slices/bookingSlice';
 import { RootState } from '../../store';
 
-const GREEN      = '#0A8F3C';
-const BG         = '#F6F7FB';
+const GREEN       = '#0A8F3C';
+const GREEN_SOFT  = '#E8F5EE';
+const BG          = '#F4F6FA';
+
+// ─── These two constants are the ONLY source of truth for card image size ───
+const CARD_IMG_W = 90;
+const CARD_IMG_H = 130;
+
 const GROUND_IMG = 'https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?w=400';
 
 type TabType = 'upcoming' | 'completed' | 'cancelled';
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: string }> = {
-  pending:   { label: 'Pending',   color: '#F59E0B', bg: '#FFF7ED', icon: 'time-outline'             },
-  approved:  { label: 'Approved',  color: GREEN,     bg: '#E8F5EE', icon: 'checkmark-circle-outline' },
+  pending:   { label: 'Pending',   color: '#F59E0B', bg: '#FFF8E7', icon: 'time-outline'             },
+  approved:  { label: 'Approved',  color: GREEN,     bg: GREEN_SOFT, icon: 'checkmark-circle-outline' },
   rejected:  { label: 'Cancelled', color: '#EF4444', bg: '#FEF2F2', icon: 'close-circle-outline'     },
-  completed: { label: 'Completed', color: '#888',    bg: '#F3F3F3', icon: 'checkmark-done-outline'   },
+  completed: { label: 'Completed', color: '#6B7280', bg: '#F3F4F6', icon: 'checkmark-done-outline'   },
 };
 const getCfg = (st: string) =>
   STATUS_CONFIG[st] ?? { label: st, color: '#888', bg: '#F5F5F5', icon: 'help-circle-outline' };
 const shortId = (id: string) => `GF${id.slice(-6).toUpperCase()}`;
 
-// ── Detail Row ────────────────────────────────────────────────────
-const DetailRow = ({ icon, label, value, valueColor, last }: {
-  icon: string; label: string; value: string; valueColor?: string; last?: boolean;
-}) => (
+/** True when slot + duration has already elapsed */
+const isSlotCompleted = (b: any): boolean => {
+  try {
+    const [timeStr, period] = (b.slotTime as string).split(' ');
+    let [h, m] = timeStr.split(':').map(Number);
+    if (period === 'PM' && h !== 12) h += 12;
+    if (period === 'AM' && h === 12) h = 0;
+    const start = new Date(`${b.date}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`);
+    const end   = new Date(start.getTime() + (Number(b.duration) || 1) * 3_600_000);
+    return Date.now() > end.getTime();
+  } catch { return false; }
+};
+
+// ── Detail Row ───────────────────────────────────────────────────
+const DetailRow = ({
+  icon, label, value, valueColor, last,
+}: { icon: string; label: string; value: string; valueColor?: string; last?: boolean }) => (
   <View style={[dr.row, !last && dr.border]}>
-    <View style={dr.iconBox}><Icon name={icon} size={16} color={GREEN} /></View>
+    <View style={dr.iconWrap}>
+      <Icon name={icon} size={15} color={GREEN} />
+    </View>
     <Text style={dr.label}>{label}</Text>
-    <Text style={[dr.value, valueColor ? { color: valueColor } : null]}>{value}</Text>
+    <Text style={[dr.value, valueColor ? { color: valueColor } : undefined]}>{value}</Text>
   </View>
 );
 const dr = StyleSheet.create({
-  row:    { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
-  border: { borderBottomWidth: 1, borderBottomColor: '#F2F2F2' },
-  iconBox:{ width: 28, alignItems: 'center' },
-  label:  { flex: 1, fontSize: 13, color: '#999', marginLeft: 10 },
-  value:  { fontSize: 13, color: '#111', fontWeight: '700', textAlign: 'right', maxWidth: '55%' },
+  row:     { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
+  border:  { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#EAECF0' },
+  iconWrap:{ width: 30, alignItems: 'center' },
+  label:   { flex: 1, fontSize: 13, color: '#9CA3AF', marginLeft: 10, fontWeight: '500' },
+  value:   { fontSize: 13, color: '#111827', fontWeight: '700', textAlign: 'right', flexShrink: 1, marginLeft: 8 },
 });
 
-// ── Main Screen ───────────────────────────────────────────────────
+// ── Main Screen ──────────────────────────────────────────────────
 const BookingsScreen = ({ navigation }: any) => {
-  const dispatch = useDispatch();
-  const insets   = useSafeAreaInsets();
-  const bookings = useSelector((state: RootState) => state.booking.bookings);
+  const dispatch  = useDispatch();
+  const insets    = useSafeAreaInsets();
+  const bookings  = useSelector((state: RootState) => state.booking.bookings);
+  const userId    = useSelector((state: RootState) => (state as any).auth.userId);
 
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab,  setActiveTab]  = useState<TabType>('upcoming');
   const [selected,   setSelected]   = useState<any>(null);
 
-  const loadBookings = useCallback(async () => {
-    try { const data = await getBookings(); dispatch(setBookings(data)); }
-    catch {} finally { setLoading(false); setRefreshing(false); }
-  }, [dispatch]);
+  const loadBookings = useCallback(async (showLoader = false) => {
+    if (!userId) { setLoading(false); return; }
+    if (showLoader) setLoading(true);
+    try {
+      const data = await getBookings(userId);
+      // Only overwrite store if API actually returned bookings.
+      // If it returns empty (userId not stored in booking doc on backend),
+      // keep whatever is already in Redux (populated via socket).
+      if (Array.isArray(data) && data.length > 0) {
+        dispatch(setBookings(data));
+      }
+    } catch {}
+    finally { setLoading(false); setRefreshing(false); }
+  }, [dispatch, userId]);
+
+  // Re-fetch every time this tab gains focus (catches newly created bookings)
+  useFocusEffect(
+    useCallback(() => {
+      loadBookings(true);
+    }, [loadBookings])
+  );
 
   useEffect(() => {
-    loadBookings();
     const onAdd = (b: any) => dispatch(addBooking(b));
     const onUpd = (b: any) => dispatch(updateBooking(b));
     socket.on('bookingCreated', onAdd);
     socket.on('bookingUpdated', onUpd);
     return () => { socket.off('bookingCreated', onAdd); socket.off('bookingUpdated', onUpd); };
-  }, [loadBookings]);
+  }, [dispatch]);
 
   const tabData: Record<TabType, any[]> = {
-    upcoming:  bookings.filter(b => b.status === 'pending'),
-    completed: bookings.filter(b => b.status === 'approved' || b.status === 'completed'),
+    upcoming:  bookings.filter(b => (b.status === 'pending' || b.status === 'approved') && !isSlotCompleted(b)),
+    completed: bookings.filter(b => b.status === 'completed' || (b.status === 'approved' && isSlotCompleted(b))),
     cancelled: bookings.filter(b => b.status === 'rejected'),
   };
-  const filtered = tabData[activeTab];
+
+  const MAX      = 10;
+  const filtered = tabData[activeTab].slice(0, MAX);
   const onRefresh = () => { setRefreshing(true); loadBookings(); };
 
   const TABS: { key: TabType; label: string }[] = [
@@ -85,58 +126,61 @@ const BookingsScreen = ({ navigation }: any) => {
     { key: 'cancelled', label: 'Cancelled' },
   ];
 
-  // ── Card ──────────────────────────────────────────────────────
+  // ── Card ─────────────────────────────────────────────────────
   const renderItem = ({ item }: any) => {
     const cfg = getCfg(item.status);
     return (
       <TouchableOpacity style={s.card} activeOpacity={0.92} onPress={() => setSelected(item)}>
-        {/* Left: fixed-size image */}
-        <View style={s.cardLeft}>
+
+        {/* LEFT — explicit pixel width + height; image fills exactly this box */}
+        <View style={s.cardImgCol}>
           <Image source={{ uri: GROUND_IMG }} style={s.cardImg} resizeMode="cover" />
+          <View style={s.imgDim} />
           <View style={[s.badge, { backgroundColor: cfg.bg }]}>
-            <Icon name={cfg.icon} size={10} color={cfg.color} />
+            <Icon name={cfg.icon} size={9} color={cfg.color} />
             <Text style={[s.badgeText, { color: cfg.color }]}>{cfg.label}</Text>
           </View>
         </View>
 
-        {/* Right: info */}
-        <View style={s.cardRight}>
-          {/* Name + ID */}
+        {/* RIGHT — flex column fills remaining width; height constrained by image */}
+        <View style={s.cardBody}>
+          {/* name + id */}
           <View style={s.cardTopRow}>
             <Text style={s.groundName} numberOfLines={1}>Green Field Arena</Text>
-            <View style={s.idBox}>
-              <Text style={s.idLabel}>BOOKING ID</Text>
+            <View style={s.idPill}>
+              <Text style={s.idTiny}>BOOKING ID</Text>
               <Text style={s.idVal}>{shortId(item._id)}</Text>
             </View>
           </View>
 
+          {/* location */}
           <View style={s.locRow}>
-            <Icon name="location-outline" size={10} color="#BBBBBB" />
+            <Icon name="location-outline" size={10} color="#9CA3AF" />
             <Text style={s.locText}>Lahore, Punjab</Text>
           </View>
 
-          {/* Chips */}
+          {/* chips */}
           <View style={s.chipsRow}>
             <View style={s.chip}>
-              <Icon name="calendar-outline" size={11} color={GREEN} />
+              <Icon name="calendar-outline" size={10} color={GREEN} />
               <Text style={s.chipText}>{item.date}</Text>
             </View>
             <View style={s.chip}>
-              <Icon name="time-outline" size={11} color={GREEN} />
+              <Icon name="time-outline" size={10} color={GREEN} />
               <Text style={s.chipText}>{item.slotTime}</Text>
             </View>
             <View style={s.chip}>
-              <Icon name="hourglass-outline" size={11} color={GREEN} />
+              <Icon name="hourglass-outline" size={10} color={GREEN} />
               <Text style={s.chipText}>{item.duration} Hr</Text>
             </View>
           </View>
 
-          {/* Footer */}
+          {/* footer */}
           <View style={s.cardFooter}>
             <Text style={s.amount}>PKR {Number(item.totalAmount).toLocaleString()}</Text>
             <View style={s.viewBtn}>
               <Text style={s.viewBtnText}>View Details</Text>
-              <Icon name="chevron-forward" size={12} color={GREEN} />
+              <Icon name="chevron-forward" size={11} color={GREEN} />
             </View>
           </View>
         </View>
@@ -144,20 +188,21 @@ const BookingsScreen = ({ navigation }: any) => {
     );
   };
 
-  // ── Modal ─────────────────────────────────────────────────────
+  // ── Modal ────────────────────────────────────────────────────
   const renderModal = () => {
     if (!selected) return null;
     const cfg = getCfg(selected.status);
     return (
       <Modal visible transparent animationType="slide" onRequestClose={() => setSelected(null)}>
         <View style={s.overlay}>
-          <View style={[s.sheet, { paddingBottom: Math.max(insets.bottom + 8, 20) }]}>
+          <View style={[s.sheet, { paddingBottom: Math.max(insets.bottom + 10, 24) }]}>
+
             <View style={s.handle} />
 
             <View style={s.sheetHead}>
               <Text style={s.sheetTitle}>Booking Details</Text>
               <TouchableOpacity style={s.closeIcon} onPress={() => setSelected(null)}>
-                <Icon name="close" size={18} color="#555" />
+                <Icon name="close" size={17} color="#374151" />
               </TouchableOpacity>
             </View>
 
@@ -167,33 +212,32 @@ const BookingsScreen = ({ navigation }: any) => {
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
-              {/* Ground card */}
-              <View style={s.groundCard}>
-                <Image source={{ uri: GROUND_IMG }} style={s.groundThumb} resizeMode="cover" />
-                <View style={{ flex: 1 }}>
-                  <Text style={s.groundCardName}>Green Field Arena</Text>
+              {/* venue */}
+              <View style={s.venueCard}>
+                <Image source={{ uri: GROUND_IMG }} style={s.venueThumb} resizeMode="cover" />
+                <View style={s.venueInfo}>
+                  <Text style={s.venueName}>Green Field Arena</Text>
                   <View style={s.locRow}>
-                    <Icon name="location-outline" size={10} color="#BBBBBB" />
+                    <Icon name="location-outline" size={10} color="#9CA3AF" />
                     <Text style={s.locText}>Lahore, Punjab</Text>
                   </View>
                 </View>
               </View>
 
-              {/* Details */}
-              <View style={s.detailsBox}>
-                <DetailRow icon="bookmark-outline"          label="Booking ID"     value={shortId(selected._id)} />
-                <DetailRow icon="person-outline"            label="Name"           value={selected.userName ?? '—'} />
-                <DetailRow icon="call-outline"              label="Phone"          value={selected.phone ?? '—'} />
-                <DetailRow icon="calendar-outline"          label="Date"           value={selected.date ?? '—'} />
-                <DetailRow icon="time-outline"              label="Time Slot"      value={selected.slotTime ?? '—'} />
-                <DetailRow icon="hourglass-outline"         label="Duration"       value={`${selected.duration} Hour${selected.duration !== 1 ? 's' : ''}`} />
-                <DetailRow icon="people-outline"            label="No. of Players" value={String(selected.numberOfPlayers ?? 1)} />
-                <DetailRow icon="cash-outline"              label="Amount Paid"    value={`PKR ${Number(selected.totalAmount).toLocaleString()}`} />
-                <DetailRow icon="card-outline"              label="Payment Method" value="EasyPaisa" />
-                <DetailRow icon="shield-checkmark-outline"  label="Payment Status" value="Paid" valueColor={GREEN} last />
+              {/* detail rows — Payment Method removed */}
+              <View style={s.detailBox}>
+                <DetailRow icon="bookmark-outline"         label="Booking ID"     value={shortId(selected._id)} />
+                <DetailRow icon="person-outline"           label="Name"           value={selected.userName ?? '—'} />
+                <DetailRow icon="call-outline"             label="Phone"          value={selected.phone ?? '—'} />
+                <DetailRow icon="calendar-outline"         label="Date"           value={selected.date ?? '—'} />
+                <DetailRow icon="time-outline"             label="Time Slot"      value={selected.slotTime ?? '—'} />
+                <DetailRow icon="hourglass-outline"        label="Duration"       value={`${selected.duration} Hour${selected.duration !== 1 ? 's' : ''}`} />
+                <DetailRow icon="people-outline"           label="No. of Players" value={String(selected.numberOfPlayers ?? 1)} />
+                <DetailRow icon="cash-outline"             label="Amount Paid"    value={`PKR ${Number(selected.totalAmount).toLocaleString()}`} />
+                <DetailRow icon="shield-checkmark-outline" label="Payment Status" value="Paid" valueColor={GREEN} last />
               </View>
 
-              <View style={{ height: 12 }} />
+              <View style={{ height: 16 }} />
             </ScrollView>
 
             <TouchableOpacity style={s.closeBtn} onPress={() => setSelected(null)}>
@@ -205,19 +249,19 @@ const BookingsScreen = ({ navigation }: any) => {
     );
   };
 
-  // ── Render ────────────────────────────────────────────────────
+  // ── Root render ──────────────────────────────────────────────
   return (
     <View style={s.root}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
       {/* Header */}
-      <View style={[s.header, { paddingTop: insets.top + 6 }]}>
+      <View style={[s.header, { paddingTop: insets.top + 8 }]}>
         <View>
           <Text style={s.headerTitle}>My Bookings</Text>
           <Text style={s.headerSub}>Track and manage your bookings</Text>
         </View>
         <TouchableOpacity style={s.notifBtn}>
-          <Icon name="notifications-outline" size={20} color="#444" />
+          <Icon name="notifications-outline" size={20} color="#374151" />
         </TouchableOpacity>
       </View>
 
@@ -233,11 +277,15 @@ const BookingsScreen = ({ navigation }: any) => {
               onPress={() => setActiveTab(t.key)}
               activeOpacity={0.8}
             >
-              {active && <Icon name="checkmark-circle" size={12} color={GREEN} style={{ marginRight: 3 }} />}
+              {active && (
+                <Icon name="checkmark-circle" size={12} color={GREEN} style={{ marginRight: 3 }} />
+              )}
               <Text style={[s.tabText, active && s.tabTextActive]}>{t.label}</Text>
               {count > 0 && (
                 <View style={[s.tabBadge, active && s.tabBadgeActive]}>
-                  <Text style={[s.tabBadgeText, active && s.tabBadgeTextActive]}>{count}</Text>
+                  <Text style={[s.tabBadgeText, active && s.tabBadgeTextActive]}>
+                    {count > MAX ? `${MAX}+` : count}
+                  </Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -252,9 +300,11 @@ const BookingsScreen = ({ navigation }: any) => {
         <FlatList
           data={filtered}
           keyExtractor={i => i._id}
-          contentContainerStyle={[s.listContent, { paddingBottom: insets.bottom + 90 }]}
+          contentContainerStyle={[s.listContent, { paddingBottom: insets.bottom + 150 }]}
           showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={GREEN} />}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={GREEN} />
+          }
           ListHeaderComponent={
             filtered.length > 0 ? (
               <View style={s.listHead}>
@@ -262,44 +312,48 @@ const BookingsScreen = ({ navigation }: any) => {
                   {TABS.find(t => t.key === activeTab)?.label} Bookings
                 </Text>
                 <TouchableOpacity style={s.filterBtn}>
-                  <Icon name="filter-outline" size={12} color="#666" />
+                  <Icon name="filter-outline" size={12} color="#6B7280" />
                   <Text style={s.filterText}>Filter</Text>
-                  <Icon name="chevron-down" size={12} color="#666" />
+                  <Icon name="chevron-down" size={12} color="#6B7280" />
                 </TouchableOpacity>
               </View>
             ) : null
           }
-          ListFooterComponent={
-            <TouchableOpacity
-              style={s.bookBanner}
-              activeOpacity={0.9}
-              onPress={() => navigation.navigate('BookNow')}
-            >
-              <Icon name="calendar-outline" size={26} color={GREEN} />
-              <View style={{ flex: 1, marginLeft: 10 }}>
-                <Text style={s.bannerTitle}>Ready for another game?</Text>
-                <Text style={s.bannerSub}>Book your next slot and enjoy the game 🏏</Text>
-              </View>
-              <View style={s.bookNowBtn}>
-                <Text style={s.bookNowText}>Book Now</Text>
-                <Icon name="chevron-forward" size={13} color="#fff" />
-              </View>
-            </TouchableOpacity>
-          }
           ListEmptyComponent={() => (
             <View style={s.empty}>
               <View style={s.emptyIcon}>
-                <Icon name="calendar-outline" size={36} color={GREEN} />
+                <Icon name="calendar-outline" size={34} color={GREEN} />
               </View>
               <Text style={s.emptyTitle}>No {activeTab} bookings</Text>
               <Text style={s.emptySub}>
-                {activeTab === 'upcoming' ? 'Book a slot to get started' : `No ${activeTab} bookings found`}
+                {activeTab === 'upcoming'
+                  ? 'Book a slot to get started'
+                  : `No ${activeTab} bookings found`}
               </Text>
             </View>
           )}
           renderItem={renderItem}
         />
       )}
+
+      {/* Book Now — pinned above bottom nav */}
+      <TouchableOpacity
+        style={[s.bookBanner, { bottom: insets.bottom + 70 }]}
+        activeOpacity={0.9}
+        onPress={() => navigation.navigate('BookNow')}
+      >
+        <View style={s.bannerIconWrap}>
+          <Icon name="calendar-outline" size={22} color={GREEN} />
+        </View>
+        <View style={{ flex: 1, marginLeft: 10 }}>
+          <Text style={s.bannerTitle}>Ready for another game?</Text>
+          <Text style={s.bannerSub}>Book your next slot and enjoy 🏏</Text>
+        </View>
+        <View style={s.bookNowBtn}>
+          <Text style={s.bookNowText}>Book Now</Text>
+          <Icon name="chevron-forward" size={13} color="#fff" />
+        </View>
+      </TouchableOpacity>
 
       {renderModal()}
     </View>
@@ -308,160 +362,210 @@ const BookingsScreen = ({ navigation }: any) => {
 
 export default BookingsScreen;
 
-// ── Styles ────────────────────────────────────────────────────────
+// ── Styles ───────────────────────────────────────────────────────
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: BG },
 
+  // Header
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 18, paddingBottom: 14,
-    backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F0F0F0',
+    backgroundColor: '#fff',
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E5E7EB',
+    elevation: 2,
+    shadowColor: '#000', shadowOpacity: 0.04, shadowOffset: { width: 0, height: 2 }, shadowRadius: 6,
   },
-  headerTitle: { fontSize: 22, fontWeight: '800', color: '#111', letterSpacing: -0.3 },
-  headerSub:   { fontSize: 12, color: '#BBBBBB', marginTop: 2 },
+  headerTitle: { fontSize: 22, fontWeight: '800', color: '#111827', letterSpacing: -0.4 },
+  headerSub:   { fontSize: 12, color: '#9CA3AF', marginTop: 2 },
   notifBtn: {
-    width: 38, height: 38, borderRadius: 19,
-    backgroundColor: '#F6F7FB', alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: '#EBEBEB',
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: '#F9FAFB', alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: '#E5E7EB',
   },
 
+  // Tabs
   tabsRow: {
     flexDirection: 'row', gap: 8, backgroundColor: '#fff',
     paddingHorizontal: 14, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: '#F0F0F0',
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E5E7EB',
   },
   tab: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 8, borderRadius: 22,
-    borderWidth: 1.5, borderColor: '#E8E8E8', backgroundColor: '#FAFAFA',
+    paddingVertical: 9, borderRadius: 24,
+    borderWidth: 1.5, borderColor: '#E5E7EB', backgroundColor: '#F9FAFB',
   },
-  tabActive:          { borderColor: GREEN, backgroundColor: '#F0FFF6' },
-  tabText:            { fontSize: 12, color: '#999', fontWeight: '600' },
+  tabActive:          { borderColor: GREEN, backgroundColor: GREEN_SOFT },
+  tabText:            { fontSize: 12, color: '#9CA3AF', fontWeight: '600' },
   tabTextActive:      { color: GREEN, fontWeight: '700' },
-  tabBadge:           { marginLeft: 4, backgroundColor: '#EBEBEB', borderRadius: 10, paddingHorizontal: 5, paddingVertical: 1 },
-  tabBadgeActive:     { backgroundColor: '#C8EDD8' },
-  tabBadgeText:       { fontSize: 10, color: '#999', fontWeight: '700' },
+  tabBadge:           { marginLeft: 4, backgroundColor: '#E5E7EB', borderRadius: 10, paddingHorizontal: 5, paddingVertical: 1 },
+  tabBadgeActive:     { backgroundColor: '#BBF7D0' },
+  tabBadgeText:       { fontSize: 10, color: '#9CA3AF', fontWeight: '700' },
   tabBadgeTextActive: { color: GREEN },
 
-  listContent: { padding: 14 },
+  // List
+  listContent:  { padding: 14 },
   listHead: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'center', marginBottom: 12,
   },
-  listHeadText: { fontSize: 15, fontWeight: '700', color: '#111' },
+  listHeadText: { fontSize: 15, fontWeight: '700', color: '#111827' },
   filterBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 11, paddingVertical: 6,
-    borderRadius: 20, backgroundColor: '#F5F5F5',
-    borderWidth: 1, borderColor: '#E8E8E8',
+    paddingHorizontal: 12, paddingVertical: 7,
+    borderRadius: 20, backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#E5E7EB',
   },
-  filterText: { fontSize: 12, color: '#666', fontWeight: '600' },
+  filterText: { fontSize: 12, color: '#6B7280', fontWeight: '600' },
 
-  // Card with fixed height — prevents image from stretching
+  // ── Card ─────────────────────────────────────────────────────
+  // No height set here. Height is driven purely by cardImgCol.
   card: {
     backgroundColor: '#fff', borderRadius: 16,
     marginBottom: 12, flexDirection: 'row',
-    height: 138,
     overflow: 'hidden',
-    elevation: 2, shadowColor: '#000',
-    shadowOpacity: 0.05, shadowOffset: { width: 0, height: 2 }, shadowRadius: 8,
+    borderWidth: 1, borderColor: '#F3F4F6',
+    elevation: 3,
+    shadowColor: '#000', shadowOpacity: 0.07,
+    shadowOffset: { width: 0, height: 3 }, shadowRadius: 10,
   },
-  cardLeft: { width: 92, position: 'relative' },
-  cardImg:  { width: 92, height: '100%' },
+
+  // Image column — explicit W & H in pixels. This defines the card height.
+  cardImgCol: {
+    width: CARD_IMG_W,
+    height: CARD_IMG_H,   // ← drives card height
+  },
+  cardImg: {
+    width: CARD_IMG_W,
+    height: CARD_IMG_H,   // same explicit pixels
+  },
+  imgDim: {
+    position: 'absolute', top: 0, left: 0,
+    width: CARD_IMG_W, height: CARD_IMG_H,
+    backgroundColor: 'rgba(0,0,0,0.10)',
+  },
   badge: {
     position: 'absolute', top: 8, left: 6,
     flexDirection: 'row', alignItems: 'center', gap: 3,
     paddingHorizontal: 6, paddingVertical: 3, borderRadius: 8,
   },
-  badgeText: { fontSize: 9.5, fontWeight: '700' },
+  badgeText: { fontSize: 9, fontWeight: '700' },
 
-  cardRight:   { flex: 1, padding: 11, justifyContent: 'space-between' },
-  cardTopRow:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  groundName:  { flex: 1, fontSize: 13.5, fontWeight: '800', color: '#111', marginRight: 6 },
-  idBox:       { alignItems: 'flex-end' },
-  idLabel:     { fontSize: 8, color: '#CCCCCC', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.3 },
-  idVal:       { fontSize: 10.5, fontWeight: '800', color: '#666', letterSpacing: 0.2 },
-  locRow:      { flexDirection: 'row', alignItems: 'center', gap: 2, marginBottom: 6 },
-  locText:     { fontSize: 10.5, color: '#BBBBBB' },
+  // Right body — flex fills remaining width; justifyContent spaces out children
+  cardBody: {
+    flex: 1, padding: 11,
+    justifyContent: 'space-between',
+  },
+  cardTopRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
+  },
+  groundName: { flex: 1, fontSize: 13.5, fontWeight: '800', color: '#111827', marginRight: 6 },
+  idPill:     { alignItems: 'flex-end' },
+  idTiny:     { fontSize: 7.5, color: '#D1D5DB', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.4 },
+  idVal:      { fontSize: 10, fontWeight: '800', color: '#6B7280' },
 
-  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginBottom: 2 },
+  locRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  locText: { fontSize: 10.5, color: '#9CA3AF' },
+
+  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
   chip: {
     flexDirection: 'row', alignItems: 'center', gap: 3,
-    backgroundColor: '#F4FBF7', paddingHorizontal: 7,
-    paddingVertical: 3, borderRadius: 7,
+    backgroundColor: '#F0FDF4', paddingHorizontal: 7, paddingVertical: 3,
+    borderRadius: 7, borderWidth: 1, borderColor: '#D1FAE5',
   },
-  chipText: { fontSize: 10.5, color: '#333', fontWeight: '500' },
+  chipText: { fontSize: 10, color: '#065F46', fontWeight: '600' },
 
   cardFooter: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingTop: 7, borderTopWidth: 1, borderTopColor: '#F4F4F4',
+    paddingTop: 7, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#F3F4F6',
   },
-  amount:      { fontSize: 14, fontWeight: '900', color: '#111' },
+  amount:  { fontSize: 13.5, fontWeight: '900', color: '#111827' },
   viewBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 2,
     paddingHorizontal: 9, paddingVertical: 5,
-    borderRadius: 14, borderWidth: 1,
-    borderColor: '#C8EDD8', backgroundColor: '#F0FFF6',
+    borderRadius: 12, borderWidth: 1.5, borderColor: '#BBF7D0', backgroundColor: '#F0FDF4',
   },
-  viewBtnText: { fontSize: 11.5, fontWeight: '700', color: GREEN },
+  viewBtnText: { fontSize: 11, fontWeight: '700', color: GREEN },
 
   // Empty state
-  empty:     { alignItems: 'center', paddingTop: 60, paddingBottom: 20 },
+  empty:     { alignItems: 'center', paddingTop: 60 },
   emptyIcon: {
-    width: 70, height: 70, borderRadius: 35,
-    backgroundColor: '#EAF7EE', alignItems: 'center',
-    justifyContent: 'center', marginBottom: 14,
+    width: 72, height: 72, borderRadius: 36,
+    backgroundColor: '#ECFDF5', alignItems: 'center', justifyContent: 'center',
+    marginBottom: 14, borderWidth: 1, borderColor: '#D1FAE5',
   },
-  emptyTitle: { fontSize: 15, fontWeight: '700', color: '#999', marginBottom: 5 },
-  emptySub:   { fontSize: 12, color: '#CCC' },
+  emptyTitle: { fontSize: 15, fontWeight: '700', color: '#6B7280', marginBottom: 4 },
+  emptySub:   { fontSize: 12, color: '#9CA3AF' },
 
-  // Book Now — part of list footer, never overlaps tab bar
+  // Book Now banner
   bookBanner: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: '#fff', borderRadius: 16, padding: 14,
-    marginTop: 6, marginBottom: 8,
-    borderWidth: 1, borderColor: '#EBEBEB',
-    elevation: 1, shadowColor: '#000',
-    shadowOpacity: 0.04, shadowOffset: { width: 0, height: 1 }, shadowRadius: 4,
+    borderWidth: 1, borderColor: '#E5E7EB',
+    elevation: 6, shadowColor: '#000',
+    shadowOpacity: 0.08, shadowOffset: { width: 0, height: 3 }, shadowRadius: 8,
   },
-  bannerTitle: { fontSize: 13, fontWeight: '700', color: '#111' },
-  bannerSub:   { fontSize: 11, color: '#BBBBBB', marginTop: 2 },
+  bannerIconWrap: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: '#F0FDF4', alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: '#D1FAE5',
+  },
+  bannerTitle: { fontSize: 13, fontWeight: '700', color: '#111827' },
+  bannerSub:   { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
   bookNowBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: GREEN, paddingHorizontal: 13,
-    paddingVertical: 9, borderRadius: 12,
+    backgroundColor: GREEN, paddingHorizontal: 13, paddingVertical: 9, borderRadius: 12,
   },
   bookNowText: { color: '#fff', fontWeight: '800', fontSize: 12.5 },
 
-  // Modal
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.46)', justifyContent: 'flex-end' },
+  // ── Modal ────────────────────────────────────────────────────
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.50)', justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: '#fff',
-    borderTopLeftRadius: 26, borderTopRightRadius: 26,
+    borderTopLeftRadius: 28, borderTopRightRadius: 28,
     paddingHorizontal: 20, paddingTop: 10,
     maxHeight: '92%',
   },
-  handle:    { width: 38, height: 4, backgroundColor: '#E0E0E0', borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
-  sheetHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  sheetTitle:{ fontSize: 19, fontWeight: '800', color: '#111', letterSpacing: -0.3 },
-  closeIcon: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F2F2F2', alignItems: 'center', justifyContent: 'center' },
+  handle: {
+    width: 40, height: 4, backgroundColor: '#E5E7EB',
+    borderRadius: 2, alignSelf: 'center', marginBottom: 18,
+  },
+  sheetHead: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', marginBottom: 14,
+  },
+  sheetTitle: { fontSize: 19, fontWeight: '800', color: '#111827', letterSpacing: -0.3 },
+  closeIcon: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center',
+  },
 
-  statusPill:     { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, marginBottom: 14 },
+  statusPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    alignSelf: 'flex-start', paddingHorizontal: 13, paddingVertical: 6,
+    borderRadius: 20, marginBottom: 16,
+  },
   statusPillText: { fontSize: 13, fontWeight: '700' },
 
-  groundCard: {
+  venueCard: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: '#F6F7FB', borderRadius: 14, padding: 10, marginBottom: 8,
+    backgroundColor: '#F9FAFB', borderRadius: 14, padding: 12, marginBottom: 12,
+    borderWidth: 1, borderColor: '#F3F4F6',
   },
-  groundThumb:    { width: 72, height: 56, borderRadius: 10 },
-  groundCardName: { fontSize: 14, fontWeight: '800', color: '#111', marginBottom: 3 },
+  venueThumb: { width: 68, height: 52, borderRadius: 10 },
+  venueInfo:  { flex: 1 },
+  venueName:  { fontSize: 14, fontWeight: '800', color: '#111827', marginBottom: 4 },
 
-  detailsBox: {
-    borderWidth: 1, borderColor: '#F0F0F0',
-    borderRadius: 14, paddingHorizontal: 12,
-    backgroundColor: '#fff', marginTop: 4,
+  detailBox: {
+    borderWidth: 1, borderColor: '#F3F4F6',
+    borderRadius: 16, paddingHorizontal: 14,
+    backgroundColor: '#fff', marginBottom: 4,
   },
 
-  closeBtn:     { marginTop: 12, backgroundColor: GREEN, borderRadius: 14, paddingVertical: 15, alignItems: 'center' },
-  closeBtnText: { fontSize: 15, fontWeight: '800', color: '#fff' },
+  closeBtn: {
+    marginTop: 12, backgroundColor: GREEN,
+    borderRadius: 14, paddingVertical: 15, alignItems: 'center',
+  },
+  closeBtnText: { fontSize: 15, fontWeight: '800', color: '#fff', letterSpacing: 0.2 },
 });

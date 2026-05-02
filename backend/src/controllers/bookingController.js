@@ -4,7 +4,7 @@ const { getIO } = require('../config/socket');
 // Create booking
 exports.createBooking = async (req, res) => {
   try {
-    const { userName, phone, slotTime, date, duration, numberOfPlayers, notes, totalAmount } = req.body;
+    const { userId, userName, phone, slotTime, date, duration, numberOfPlayers, notes, totalAmount } = req.body;
 
     const existing = await Booking.findOne({
       slotTime, date, status: { $in: ['pending', 'approved'] },
@@ -12,6 +12,7 @@ exports.createBooking = async (req, res) => {
     if (existing) return res.status(400).json({ message: 'This slot is already booked' });
 
     const booking = new Booking({
+      userId:   userId   || '',
       userName, phone, slotTime, date,
       duration: duration || 1,
       numberOfPlayers: numberOfPlayers || 1,
@@ -30,10 +31,27 @@ exports.createBooking = async (req, res) => {
   }
 };
 
-// Get all bookings
+// Get bookings — filtered by userId for regular users, all for admin
 exports.getBookings = async (req, res) => {
   try {
-    const bookings = await Booking.find().sort({ createdAt: -1 });
+    const { userId, date } = req.query;
+    const query = {};
+    if (userId) query.userId = userId;   // only this user's bookings
+    if (date)   query.date   = date;
+    const bookings = await Booking.find(query).sort({ createdAt: -1 });
+    res.json(bookings);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Admin: get ALL bookings regardless of user (for admin panel)
+exports.getAllBookings = async (req, res) => {
+  try {
+    const { date } = req.query;
+    const query = {};
+    if (date) query.date = date;
+    const bookings = await Booking.find(query).sort({ createdAt: -1 });
     res.json(bookings);
   } catch (error) {
     res.status(500).json({ message: error.message });

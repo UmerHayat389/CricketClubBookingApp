@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   Modal, TextInput, ScrollView, Image, Platform,
-  KeyboardAvoidingView, ActivityIndicator, Animated, Dimensions, Alert,
+  KeyboardAvoidingView, ActivityIndicator, Animated, Dimensions,
 } from 'react-native';
 import { launchImageLibrary } from 'react-native-image-picker';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -10,8 +10,8 @@ import { useDispatch, useSelector } from 'react-redux';
 
 import socket from '../../socket/socket';
 import { RootState } from '../../store';
-import { setEvents, addEvent, updateEvent, removeEvent, Event } from '../../store/slices/eventSlice';
-import { getEvents, createEvent, updateEvent as apiUpdate, deleteEvent, toggleFreeEvent } from '../../services/eventService';
+import { setEvents, addEvent, updateEvent, deleteEvent, Event } from '../../store/slices/eventSlice';
+import { getEvents, createEvent, updateEvent as apiUpdate, deleteEvent as apiDelete, toggleFreeEvent } from '../../services/eventService';
 import { MEDIA_URL } from '../../config/baseUrl';
 
 // ─────────────────────────────────────────────────────────────────
@@ -63,6 +63,71 @@ const ts = StyleSheet.create({
   text: { flex: 1, fontSize: 13, fontWeight: '600' },
 });
 
+// ── DeleteConfirmModal ───────────────────────────────────────────
+interface DeleteConfirmProps {
+  visible: boolean;
+  eventTitle: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+  deleting: boolean;
+}
+const DeleteConfirmModal = ({ visible, eventTitle, onCancel, onConfirm, deleting }: DeleteConfirmProps) => (
+  <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+    <TouchableOpacity style={del.overlay} activeOpacity={1} onPress={onCancel}>
+      <TouchableOpacity activeOpacity={1} style={del.box}>
+
+        {/* Icon + heading */}
+        <View style={del.topRow}>
+          <View style={del.iconCircle}>
+            <Icon name="trash-outline" size={18} color={RED_ERR} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={del.title}>Delete event?</Text>
+            <Text style={del.subtitle}>This cannot be undone</Text>
+          </View>
+        </View>
+
+        {/* Event name preview */}
+        <View style={del.previewBox}>
+          <Icon name="trophy-outline" size={13} color="#888" />
+          <Text style={del.previewText} numberOfLines={1}>{eventTitle}</Text>
+          <Text style={del.previewText}> will be permanently removed.</Text>
+        </View>
+
+        {/* Actions */}
+        <View style={del.btnRow}>
+          <TouchableOpacity style={del.cancelBtn} onPress={onCancel} disabled={deleting}>
+            <Text style={del.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[del.deleteBtn, deleting && { opacity: 0.65 }]} onPress={onConfirm} disabled={deleting}>
+            {deleting
+              ? <ActivityIndicator size="small" color="#fff" />
+              : <><Icon name="trash-outline" size={14} color="#fff" /><Text style={del.deleteText}>Delete</Text></>
+            }
+          </TouchableOpacity>
+        </View>
+
+      </TouchableOpacity>
+    </TouchableOpacity>
+  </Modal>
+);
+
+const del = StyleSheet.create({
+  overlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
+  box:        { backgroundColor: '#fff', borderRadius: 18, width: Dimensions.get('window').width - 48, padding: 20, elevation: 24, shadowColor: '#000', shadowOpacity: 0.18, shadowOffset: { width: 0, height: 8 }, shadowRadius: 24 },
+  topRow:     { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
+  iconCircle: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#FEE2E2', alignItems: 'center', justifyContent: 'center' },
+  title:      { fontSize: 15, fontWeight: '700', color: '#111' },
+  subtitle:   { fontSize: 12, color: '#999', marginTop: 2 },
+  previewBox: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 5, backgroundColor: '#F7F8FA', borderRadius: 10, borderWidth: 1, borderColor: '#EFEFEF', paddingHorizontal: 12, paddingVertical: 10, marginBottom: 18 },
+  previewText:{ fontSize: 13, color: '#555' },
+  btnRow:     { flexDirection: 'row', gap: 10 },
+  cancelBtn:  { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1.5, borderColor: '#E0E0E0', alignItems: 'center' },
+  cancelText: { fontSize: 14, fontWeight: '600', color: '#666' },
+  deleteBtn:  { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 12, backgroundColor: RED_ERR },
+  deleteText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+});
+
 // ── CalendarPicker ───────────────────────────────────────────────
 const CalendarPicker = ({ visible, onClose, onSelect }: { visible: boolean; onClose: () => void; onSelect: (d: string) => void; }) => {
   const today = new Date();
@@ -111,12 +176,16 @@ const AdminEventsScreen = () => {
 
   // Form modal state
   const [formVisible,  setFormVisible]  = useState(false);
-  const [editingEvent, setEditingEvent] = useState<Event | null>(null); // null = create, Event = edit
+  const [editingEvent, setEditingEvent] = useState<Event | null>(null);
   const [saving,       setSaving]       = useState(false);
   const [calVisible,   setCalVisible]   = useState(false);
 
   // Detail modal state
   const [detailEvent,  setDetailEvent]  = useState<Event | null>(null);
+
+  // Delete confirm modal state
+  const [deleteTarget,  setDeleteTarget]  = useState<Event | null>(null);
+  const [deleting,      setDeleting]      = useState(false);
 
   // Form fields
   const [banner,      setBanner]      = useState<BannerAsset | null>(null);
@@ -125,7 +194,7 @@ const AdminEventsScreen = () => {
   const [date,        setDate]        = useState('');
   const [location,    setLocation]    = useState('');
   const [entryFee,    setEntryFee]    = useState('');
-  const [previousFee, setPreviousFee] = useState(0); // for toggle-free restore
+  const [previousFee, setPreviousFee] = useState(0);
 
   const [errors,  setErrors]  = useState<FormErrors>({});
   const [touched, setTouched] = useState<Record<string,boolean>>({});
@@ -145,11 +214,10 @@ const AdminEventsScreen = () => {
     const onCreate = (e: Event) => dispatch(addEvent(e));
     const onUpdate = (e: Event) => {
       dispatch(updateEvent(e));
-      // keep detail modal in sync
       setDetailEvent(d => d?._id === e._id ? e : d);
     };
     const onDelete = ({ _id }: { _id: string }) => {
-      dispatch(removeEvent({ _id }));
+      dispatch(deleteEvent(_id));
       setDetailEvent(d => d?._id === _id ? null : d);
     };
     socket.on('eventCreated', onCreate);
@@ -165,10 +233,10 @@ const AdminEventsScreen = () => {
   // ── Validation ───────────────────────────────────────────────
   const validate = (): FormErrors => {
     const errs: FormErrors = {};
-    if (!title.trim())                          errs.title = 'Event title is required';
-    else if (title.trim().length > LIMITS.title) errs.title = `Max ${LIMITS.title} characters`;
+    if (!title.trim())                           errs.title = 'Event title is required';
+    else if (title.trim().length > LIMITS.title)  errs.title = `Max ${LIMITS.title} characters`;
     if (description.trim().length > LIMITS.description) errs.description = `Max ${LIMITS.description} characters`;
-    if (!date.trim())                           errs.date = 'Please select a date';
+    if (!date.trim())                            errs.date = 'Please select a date';
     if (location.trim().length > LIMITS.location) errs.location = `Max ${LIMITS.location} characters`;
     if (entryFee && !/^\d{1,5}$/.test(entryFee)) errs.entryFee = 'Enter a valid amount';
     return errs;
@@ -192,9 +260,9 @@ const AdminEventsScreen = () => {
 
   // ── Open form for edit ────────────────────────────────────────
   const openEdit = (ev: Event) => {
-    setDetailEvent(null); // close detail modal first
+    setDetailEvent(null);
     setEditingEvent(ev);
-    setBanner(null); // user must re-upload if they want to change it
+    setBanner(null);
     setTitle(ev.title);
     setDescription(ev.description || '');
     setDate(ev.date || '');
@@ -245,24 +313,23 @@ const AdminEventsScreen = () => {
     } finally { setSaving(false); }
   };
 
-  // ── Delete ────────────────────────────────────────────────────
+  // ── Delete — opens custom confirm modal ───────────────────────
   const handleDelete = (ev: Event) => {
-    Alert.alert(
-      'Delete Event',
-      `Are you sure you want to delete "${ev.title}"? This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete', style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteEvent(ev._id);
-              showToast('Event deleted', 'info');
-            } catch { showToast('Failed to delete event', 'error'); }
-          },
-        },
-      ]
-    );
+    setDetailEvent(null); // close detail modal if open
+    setDeleteTarget(ev);
+  };
+
+  // ── Confirmed delete ──────────────────────────────────────────
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await apiDelete(deleteTarget._id);
+      setDeleteTarget(null);
+      showToast('Event deleted', 'info');
+    } catch {
+      showToast('Failed to delete event', 'error');
+    } finally { setDeleting(false); }
   };
 
   // ── Toggle Free ───────────────────────────────────────────────
@@ -283,7 +350,6 @@ const AdminEventsScreen = () => {
         <View style={st.cardBannerPlaceholder}><Icon name="trophy-outline" size={32} color={GREEN}/></View>
       )}
 
-      {/* Date badge */}
       {!!item.date && (
         <View style={st.dateBadge}>
           <Icon name="calendar" size={11} color="#fff"/>
@@ -294,7 +360,6 @@ const AdminEventsScreen = () => {
       <View style={st.cardBody}>
         <View style={st.cardTopRow}>
           <Text style={st.cardTitle} numberOfLines={1}>{item.title}</Text>
-          {/* Action buttons */}
           <View style={st.cardActions}>
             <TouchableOpacity style={st.actionBtn} onPress={() => handleToggleFree(item)}>
               <Icon name={item.entryFee > 0 ? 'pricetag-outline' : 'gift-outline'} size={15} color={item.entryFee > 0 ? '#C47A00' : GREEN}/>
@@ -345,7 +410,6 @@ const AdminEventsScreen = () => {
         <View style={st.detailBox}>
           <View style={st.modalHandle}/>
           <ScrollView showsVerticalScrollIndicator={false}>
-            {/* Banner */}
             {detailEvent?.banner ? (
               <Image source={{ uri: `${MEDIA_URL}/uploads/events/${detailEvent.banner}` }} style={st.detailBanner} resizeMode="cover"/>
             ) : (
@@ -353,7 +417,6 @@ const AdminEventsScreen = () => {
             )}
 
             <View style={st.detailContent}>
-              {/* Date badge */}
               {!!detailEvent?.date && (
                 <View style={st.detailDateBadge}>
                   <Icon name="calendar-outline" size={13} color={GREEN}/>
@@ -366,7 +429,6 @@ const AdminEventsScreen = () => {
 
               <View style={st.detailDivider}/>
 
-              {/* Detail rows */}
               {[
                 detailEvent?.location  && { icon: 'location-outline',  label: 'Venue / Location', value: detailEvent.location },
                 detailEvent !== null   && { icon: 'cash-outline',       label: 'Entry Fee', value: (detailEvent!.entryFee > 0 ? `Rs. ${detailEvent!.entryFee}` : 'Free Entry') },
@@ -383,7 +445,6 @@ const AdminEventsScreen = () => {
             </View>
           </ScrollView>
 
-          {/* Action buttons row */}
           <View style={st.detailActionRow}>
             <TouchableOpacity style={st.detailActionBtn} onPress={() => detailEvent && handleToggleFree(detailEvent)}>
               <Icon name={detailEvent?.entryFee === 0 ? 'pricetag-outline' : 'gift-outline'} size={16} color={detailEvent?.entryFee === 0 ? '#C47A00' : GREEN}/>
@@ -442,6 +503,15 @@ const AdminEventsScreen = () => {
 
       {/* ── Detail Modal ─────────────────────────────────────── */}
       <DetailModal/>
+
+      {/* ── Delete Confirm Modal ─────────────────────────────── */}
+      <DeleteConfirmModal
+        visible={!!deleteTarget}
+        eventTitle={deleteTarget?.title ?? ''}
+        onCancel={() => !deleting && setDeleteTarget(null)}
+        onConfirm={confirmDelete}
+        deleting={deleting}
+      />
 
       {/* ── Create / Edit Form Modal ─────────────────────────── */}
       <Modal
@@ -690,7 +760,7 @@ const st = StyleSheet.create({
 
   bannerPicker:{ borderWidth:1.5, borderColor:'#DDD', borderStyle:'dashed', borderRadius:14, overflow:'hidden', marginBottom:6 },
   bannerPreview:{ width:'100%', height:180 },
-  bannerEditOverlay:{ ...StyleSheet.absoluteFill, backgroundColor:'rgba(0,0,0,0.45)', alignItems:'center', justifyContent:'center' },
+  bannerEditOverlay:{ position:'absolute', top:0, left:0, right:0, bottom:0, backgroundColor:'rgba(0,0,0,0.45)', alignItems:'center', justifyContent:'center' },
   bannerPlaceholder:{ height:140, alignItems:'center', justifyContent:'center', gap:8, backgroundColor:'#FAFAFA' },
   bannerIconCircle:{ width:56, height:56, borderRadius:28, backgroundColor:'#E8F5EE', alignItems:'center', justifyContent:'center', marginBottom:4 },
   bannerPlaceholderTitle:{ fontSize:14, color:'#444', fontWeight:'600' },

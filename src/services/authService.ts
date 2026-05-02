@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import API from './api';
 
-// ── Admin ─────────────────────────────────────────────────────────────────────
+// ── Admin ──────────────────────────────────────────────────────────────────
 export const loginAdmin = async (email: string, password: string) => {
   const res = await API.post('/auth/login', { email, password });
   if (res.data.token) {
@@ -14,36 +14,31 @@ export const logoutAdmin = async () => {
   await AsyncStorage.removeItem('adminToken');
 };
 
-// ── User ──────────────────────────────────────────────────────────────────────
-
-/** Register a new user with just their name */
-export const registerUser = async (name: string) => {
-  const res = await API.post('/user-auth/register', { name });
-  // res.data = { _id, name }
-  await AsyncStorage.setItem('userName',   res.data.name);
-  await AsyncStorage.setItem('userId',     res.data._id);
-  return res.data;
-};
-
-/** Login an existing user by name */
+// ── User (name-based, no password) ────────────────────────────────────────
+// FIX: was '/auth/user/login' — server registers it at '/api/user-auth/login'
 export const loginUser = async (name: string) => {
   const res = await API.post('/user-auth/login', { name });
-  // res.data = { _id, name }
-  await AsyncStorage.setItem('userName',   res.data.name);
-  await AsyncStorage.setItem('userId',     res.data._id);
-  return res.data;
+  // Persist session so app restart auto-logs in
+  await AsyncStorage.setItem('userId',   res.data._id);
+  await AsyncStorage.setItem('userName', res.data.name);
+  return res.data; // { _id, name }
 };
 
-/** Restore user session from AsyncStorage on app start */
-export const restoreUserSession = async () => {
-  const name   = await AsyncStorage.getItem('userName');
-  const userId = await AsyncStorage.getItem('userId');
-  if (name && userId) return { name, userId };
-  return null;
+export const registerUser = async (name: string) => {
+  const res = await API.post('/user-auth/register', { name });
+  await AsyncStorage.setItem('userId',   res.data._id);
+  await AsyncStorage.setItem('userName', res.data.name);
+  return res.data; // { _id, name }
 };
 
-/** Clear user session */
 export const logoutUser = async () => {
-  await AsyncStorage.removeItem('userName');
-  await AsyncStorage.removeItem('userId');
+  await AsyncStorage.multiRemove(['userId', 'userName']);
+};
+
+// Called on app start — restores session if user was previously logged in
+export const restoreUserSession = async (): Promise<{ userId: string; name: string } | null> => {
+  const userId   = await AsyncStorage.getItem('userId');
+  const userName = await AsyncStorage.getItem('userName');
+  if (userId && userName) return { userId, name: userName };
+  return null;
 };
